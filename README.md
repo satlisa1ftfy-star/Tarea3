@@ -53,3 +53,5 @@ Motor:
 ```text
 SQL Server
 
+<img width="1920" height="1030" alt="image" src="https://github.com/user-attachments/assets/ce9236b7-d41e-416f-816e-38067afbb690" />
+
