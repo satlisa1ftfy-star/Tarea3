@@ -46,6 +46,9 @@ Se encarga de:
 
 La lógica de búsqueda y filtrado se mantiene principalmente en los procedimientos almacenados.
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/72d18263-54e1-4849-83cf-5a2d3210bb99" />
+
+
 ## Base de datos
 
 Motor:
@@ -53,5 +56,4 @@ Motor:
 ```text
 SQL Server
 
-<img width="1920" height="1030" alt="image" src="https://github.com/user-attachments/assets/ce9236b7-d41e-416f-816e-38067afbb690" />
 
