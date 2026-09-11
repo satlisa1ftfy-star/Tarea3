@@ -1,34 +1,55 @@
-# Service Product
+# Gestión de Requerimientos - Backend
 
-Servicio para la gestión de productos.
+API REST desarrollada con Spring Boot para la gestión y consulta de requerimientos.
 
-## Funcionalidades
+El proyecto permite consultar información de requerimientos, personas, unidades orgánicas, categorías, subcategorías, estados y roles mediante procedimientos almacenados de SQL Server.
 
-- Crear producto
-- Listar productos
-- Buscar producto por ID
-- Actualizar producto
-- Eliminar producto
+## Tecnologías
 
-## Evidencias de funcionamiento
+- Java 17
+- Spring Boot
+- Spring Web
+- Spring Data JPA
+- Hibernate
+- SQL Server
+- Lombok
+- Swagger / OpenAPI
+- Maven
 
-### Crear producto
+## Arquitectura
 
-<img width="1297" height="741" alt="image" src="https://github.com/user-attachments/assets/8d1657df-4cbe-41e0-b3a5-df0c75b1a3f9" />
+La aplicación sigue la siguiente estructura:
 
-### Listar productos
+Controller → Service → Repository → Stored Procedure → SQL Server
 
-<img width="1287" height="667" alt="image" src="https://github.com/user-attachments/assets/e4b76cbf-5cc0-4505-a6c6-f164b9474a64" />
+### Controller
 
-### Buscar producto por ID
+Expone los endpoints REST.
 
-<img width="687" height="564" alt="image" src="https://github.com/user-attachments/assets/7054463c-6db3-4d77-b4bd-d5df788f17fb" />
+### Service
 
-### Actualizar producto
+Realiza validaciones y normalización de parámetros.
 
-<img width="1290" height="909" alt="image" src="https://github.com/user-attachments/assets/5830be9f-11e1-48e4-ab19-5ea7d449ffc1" />
+Ejemplo:
 
-### Eliminar producto
+- `0`: no aplicar filtro numérico.
+- `TODO`: no aplicar filtro de texto.
+- `null`: se convierte al valor general correspondiente.
 
-<img width="828" height="379" alt="image" src="https://github.com/user-attachments/assets/68016281-b84a-4557-9f42-4c0cfc4a113a" />
+### Repository
+
+Se encarga de:
+
+- Generar el XML solicitado por los procedimientos almacenados.
+- Ejecutar los Stored Procedures.
+- Mapear los resultados SQL hacia los modelos Java.
+
+La lógica de búsqueda y filtrado se mantiene principalmente en los procedimientos almacenados.
+
+## Base de datos
+
+Motor:
+
+```text
+SQL Server
 
