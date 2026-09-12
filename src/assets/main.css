@@ -48,3 +48,26 @@
   .toolbar { margin-right: -12px; padding-right: 12px; }
   .detail-panel h2 { padding-right: 22px; }
 }
+
+.conn-status {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+.conn-status--offline {
+  color: #b45309;
+}
+.conn-status--offline button {
+  margin-left: 0.5rem;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+
+.reference-error--login {
+  margin: 0.5rem 0 0;
+  text-align: center;
+}
