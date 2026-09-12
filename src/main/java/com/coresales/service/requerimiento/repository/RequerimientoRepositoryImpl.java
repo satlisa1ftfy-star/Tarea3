@@ -29,7 +29,8 @@ public class RequerimientoRepositoryImpl
             Integer codigoUoSolicitante,
             Integer codigoPersonaResponsable,
             Integer codigoUoResponsable,
-            Integer codigoEstado
+            Integer codigoEstado,
+            Integer vigencia
     ) {
 
         String xml =
@@ -44,6 +45,7 @@ public class RequerimientoRepositoryImpl
                         "iCodigoPerResponsable=\"" + codigoPersonaResponsable + "\" " +
                         "iCodUoResponsable=\"" + codigoUoResponsable + "\" " +
                         "siCodigoEst=\"" + codigoEstado + "\" " +
+                        "siVigencia=\"" + vigencia + "\" " +
                         "/>" +
                         "</R>";
 

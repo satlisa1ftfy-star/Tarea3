@@ -46,6 +46,7 @@ public class RequerimientoController {
                     - codigoPersonaResponsable = 0
                     - codigoUoResponsable = 0
                     - codigoEstado = 0
+                    - vigencia = 3 (1 = vigente, 2 = no vigente, 3 = todos)
 
                     El formato de las fechas es yyyy-MM-dd.
                     """
@@ -140,7 +141,17 @@ public class RequerimientoController {
                     required = false,
                     defaultValue = "0"
             )
-            Integer codigoEstado
+            Integer codigoEstado,
+
+            @Parameter(
+                    description = "Vigencia del requerimiento. 1 = vigente, 2 = no vigente, 3 = todos.",
+                    example = "3"
+            )
+            @RequestParam(
+                    required = false,
+                    defaultValue = "3"
+            )
+            Integer vigencia
     ) {
 
         return ResponseEntity.ok(
@@ -153,7 +164,8 @@ public class RequerimientoController {
                         codigoUoSolicitante,
                         codigoPersonaResponsable,
                         codigoUoResponsable,
-                        codigoEstado
+                        codigoEstado,
+                        vigencia
                 )
         );
     }

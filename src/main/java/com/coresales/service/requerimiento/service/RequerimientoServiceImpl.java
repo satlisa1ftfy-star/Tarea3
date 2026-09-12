@@ -31,7 +31,8 @@ public class RequerimientoServiceImpl
             Integer codigoUoSolicitante,
             Integer codigoPersonaResponsable,
             Integer codigoUoResponsable,
-            Integer codigoEstado
+            Integer codigoEstado,
+            Integer vigencia
     ) {
 
         // Número de requerimiento
@@ -94,6 +95,12 @@ public class RequerimientoServiceImpl
             codigoEstado = 0;
         }
 
+        // Vigencia
+        // 1 = vigentes, 2 = no vigentes, 3 = todos (por defecto)
+        if (vigencia == null) {
+            vigencia = 3;
+        }
+
         return requerimientoRepository.buscar(
                 numero,
                 titulo.trim(),
@@ -103,7 +110,8 @@ public class RequerimientoServiceImpl
                 codigoUoSolicitante,
                 codigoPersonaResponsable,
                 codigoUoResponsable,
-                codigoEstado
+                codigoEstado,
+                vigencia
         );
     }
 }
