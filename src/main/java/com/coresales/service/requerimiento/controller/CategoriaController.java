@@ -15,6 +15,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/requerimiento")
+@CrossOrigin("http://localhost:5173")
 @Tag(
         name = "Gestión de Requerimientos",
         description = "Servicios de Gestión de Requerimientos"
