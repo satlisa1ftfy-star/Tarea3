@@ -1,13 +1,19 @@
 package com.coresales.service.requerimiento.controller;
 
+import com.coresales.service.requerimiento.model.AsignarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.Requerimiento;
+import com.coresales.service.requerimiento.model.RequerimientoAsignado;
+import com.coresales.service.requerimiento.service.IRequerimientoAsignacionService;
 import com.coresales.service.requerimiento.service.IRequerimientoService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,12 +28,16 @@ import java.util.List;
 public class RequerimientoController {
 
     private final IRequerimientoService requerimientoService;
+    private final IRequerimientoAsignacionService requerimientoAsignacionService;
 
     public RequerimientoController(
-            IRequerimientoService requerimientoService
+            IRequerimientoService requerimientoService,
+            IRequerimientoAsignacionService requerimientoAsignacionService
     ) {
         this.requerimientoService =
                 requerimientoService;
+        this.requerimientoAsignacionService =
+                requerimientoAsignacionService;
     }
 
     @GetMapping("/buscar")
@@ -169,5 +179,45 @@ public class RequerimientoController {
                         vigencia
                 )
         );
+    }
+
+    @PostMapping("/asignar")
+    @Operation(
+            summary = "Asignar requerimiento",
+            description = """
+                    Asigna un requerimiento a una persona responsable
+                    """
+    )
+    public ResponseEntity<RequerimientoAsignado> asignar(
+            @RequestBody
+            AsignarRequerimientoRequest solicitud,
+            HttpServletRequest httpRequest
+    ) {
+
+        String ipCliente =
+                obtenerIpCliente(httpRequest);
+
+        return ResponseEntity.ok(
+                requerimientoAsignacionService.asignar(
+                        solicitud,
+                        ipCliente
+                )
+        );
+    }
+
+    /**
+     * Lee la IP real del usuario desde 'X-Forwarded-For' por si la petición pasa
+     * por un proxy/balanceador. Si no existe la cabecera, usa la IP directa (getRemoteAddr).
+     */
+    private String obtenerIpCliente(HttpServletRequest request) {
+
+        String forwardedFor =
+                request.getHeader("X-Forwarded-For");
+
+        if (StringUtils.hasText(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+
+        return request.getRemoteAddr();
     }
 }
