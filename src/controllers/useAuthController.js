@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { login as loginApi } from '../services/seguridadService'
 import { authHttp } from '../services/authHttp'
+import { http } from '../services/http'
 
 export function useAuthController() {
   const username = ref('')
@@ -10,7 +11,7 @@ export function useAuthController() {
   const isAuthenticated = ref(false)
   const loading = ref(false)
   const errorMessage = ref('')
-  // Datos devueltos por el backend al iniciar sesión (spGR_Seguridad_ConsultarUsuario).
+  // Datos devueltos por el backend al iniciar sesión
   const perfil = ref(null)
 
   async function login() {
@@ -21,10 +22,7 @@ export function useAuthController() {
 
     loading.value = true
     try {
-      // El usuario es el usuario de dominio (Windows), p. ej. "JGUILLEN".
-      // La contraseña no se valida contra el backend: este sistema confía
-      // en el inicio de sesión de Windows/dominio y solo verifica que el
-      // usuario esté registrado y tenga roles activos en Gestión de Requerimientos.
+//  Confía en la autenticación de Windows (ej. "JGUILLEN"); solo valida la existencia y roles del usuario en BD.
       perfil.value = await loginApi(username.value.trim())
       isAuthenticated.value = true
     } catch (error) {
@@ -37,6 +35,7 @@ export function useAuthController() {
 
   function logout() {
     authHttp.clearAuthToken()
+    http.clearAuthToken()
     isAuthenticated.value = false
     perfil.value = null
     submitted.value = false

@@ -1,5 +1,6 @@
-// El backend (Spring) responde los errores como ProblemDetail/JSON con
-// "detail" o "message". Si no se puede leer, cae a un mensaje genérico.
+/**
+ * Procesa errores devueltos por la API (ProblemDetail / JSON).
+ */
 async function extraerMensajeError(response, path) {
   try {
     const data = await response.json()
@@ -14,14 +15,8 @@ async function extraerMensajeError(response, path) {
 const TIMEOUT_MS = 15000
 
 /**
- * Crea un cliente HTTP apuntando a un backend distinto. Se usa una fábrica
- * porque este frontend consume dos microservicios independientes:
- * service-requerimiento y service-user-auth (login), cada uno con su propia
- * URL base.
- *
- * Además soporta un token Bearer opcional (setAuthToken/clearAuthToken),
- * para el esquema de JWT de service-user-auth: una vez logueado, todas las
- * peticiones que use ese cliente incluyen "Authorization: Bearer <token>".
+ * Cliente HTTP configurable para distintas URLs base que administra
+ * el token Bearer (`Authorization`) según el estado de autenticación.
  */
 export function createHttpClient(baseUrl) {
   let authToken = null
@@ -39,9 +34,7 @@ export function createHttpClient(baseUrl) {
     if (body) headers['Content-Type'] = 'application/json'
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`
 
-    // Sin esto, si el backend nunca responde (SQL Server lento/colgado,
-    // pool de conexiones agotado, etc.) la promesa de fetch queda pendiente
-    // para siempre y la vista se queda en "Cargando..." sin avisar nada.
+// Define un tiempo límite de respuesta (timeout) para evitar bloqueos indefinidos en la interfaz.
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
@@ -83,5 +76,5 @@ export function createHttpClient(baseUrl) {
   }
 }
 
-// Cliente para service-requerimiento (requerimientos, personas, categorías, etc.)
+// Cliente para requerimiento (requerimientos, personas, categorías, etc.)
 export const http = createHttpClient(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080')
