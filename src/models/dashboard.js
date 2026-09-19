@@ -37,19 +37,6 @@ const COLUMNAS_MIS_REQUERIMIENTOS = [
   { title: 'No conforme', tone: 'rose', estados: [ESTADO.NO_CONFORME] },
 ]
 
-// Datos de referencia (mock) usados como respaldo si el backend no responde.
-export const mockMetrics = [
-  ['Total', '128', 'document'], ['Por asignar', '16', 'briefcase'], ['Asignados', '28', 'user'], ['En proceso', '34', 'refresh'],
-  ['Atendidos', '32', 'check'], ['Cerrado', '24', 'lock'], ['No conforme', '4', 'close'],
-]
-
-export const mockColumns = [
-  { title: 'Por asignar', tone: 'amber', total: 16, cards: [['REQ-2026-00117', 'Revisar integracion con el SIAF', 'Gerencia de Informatica', '30/08/2026', 'Alta'], ['REQ-2026-00123', 'Soporte para envio masivo de correos', 'Comunicacion', '30/08/2026', 'Media'], ['REQ-2026-00128', 'Actualizacion de instructivo', 'Oficina de Planeamiento', '30/08/2026', 'Baja']] },
-  { title: 'Asignados', tone: 'purple', total: 28, cards: [['REQ-2026-00110', 'Validar configuracion de alertas', 'Gerencia de Fiscalizacion', '29/08/2026', 'Alta'], ['REQ-2026-00122', 'Actualizacion de datos de usuarios', 'Gerencia de Informatica', '29/08/2026', 'Baja'], ['REQ-2026-00119', 'Correo no recibido por contribuyente', 'Comunicaciones', '27/08/2026', 'Baja']] },
-  { title: 'En proceso', tone: 'blue', total: 34, cards: [['REQ-2026-00125', 'Validacion de reglas de negocio', 'Gerencia de Fiscalizacion', '30/08/2026', 'Alta'], ['REQ-2026-00118', 'Mejora en tiempos de carga', 'Gerencia de Informatica', '26/08/2026', 'Media']] },
-  { title: 'Atendido', tone: 'green', total: 32, cards: [['REQ-2026-00112', 'Generacion de reporte mensual', 'Gerencia de Planificacion', '25/08/2026', 'Baja'], ['REQ-2026-00109', 'Permisos para nuevo colaborador', 'Recursos Humanos', '23/08/2026', 'Media'], ['REQ-2026-00107', 'Ajuste en formato de impresion', 'Gerencia de Informatica', '21/08/2026', 'Baja']] },
-]
-
 // Datos de referencia (mock) para "Mis pendientes".
 export const mockMetricsPendientes = [
   ['Por asignar', '4', 'briefcase'], ['Por atender', '9', 'clock'], ['Por autorizar', '2', 'document'], ['Por dar conformidad', '3', 'check'], ['No conforme', '1', 'close'],
@@ -108,7 +95,7 @@ function aTarjeta(req) {
 }
 
 /**
- * Agrupa requerimientos en las columnas fijas de "Mis requerimientos"
+ * Agrupa requerimientos "Mis requerimientos"
  * mediante códigos de estado, consolidando cierres y separando "No conforme".
  */
 export function construirTablero(requerimientos) {
@@ -117,32 +104,29 @@ export function construirTablero(requerimientos) {
     return { title: col.title, tone: col.tone, total: reqs.length, cards: reqs.map(aTarjeta) }
   })
 
-  const metrics = [
-    ['Total', String(requerimientos.length), 'document'],
-    ...columns.map((c) => [c.title, String(c.total), 'briefcase']),
-  ]
+  const metrics = columns.map((c) => [c.title, String(c.total), 'briefcase'])
 
   return { metrics, columns }
 }
 
 /**
- * Mis requerimientos: filtra únicamente los registrados por el usuario conectado
+ * Mis requerimientos: filtra únicamente los registrados por el usuario logueado
  */
 export async function cargarTablero(perfil = null) {
   const codigoPersonaGr = perfil?.codigoPersonaGr
 
-  try {
-    const requerimientos = codigoPersonaGr
-      ? await buscarRequerimientos({ codigoPersonaSolicitante: codigoPersonaGr, vigencia: 1 })
-      : await buscarRequerimientos({ vigencia: 1 })
+  if (!codigoPersonaGr) {
+    return { ...construirTablero([]), online: true }
+  }
 
+  try {
+    const requerimientos = await buscarRequerimientos({ codigoPersonaSolicitante: codigoPersonaGr, vigencia: 1 })
     return { ...construirTablero(requerimientos), online: true }
   } catch (error) {
 //  Imprime el error técnico completo en consola (CORS, 500, red) para depuración.
-    console.error('No se pudo conectar con service-requerimiento, usando datos de referencia.', error)
+    console.error('No se pudo conectar con service-requerimiento.', error)
     return {
-      metrics: mockMetrics,
-      columns: mockColumns,
+      ...construirTablero([]),
       online: false,
       error,
       errorMessage: error?.message || 'Error desconocido',

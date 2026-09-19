@@ -1,47 +1,151 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { ESTADO, buscarAvanzado, cargarPendientes, cargarTablero, mockColumns, mockMetrics } from '../models/dashboard'
+import { ESTADO, buscarAvanzado, cargarPendientes, cargarTablero } from '../models/dashboard'
 import { listarRoles } from '../services/seguridadService'
 import { listarPersonas } from '../services/personaService'
 import { buscarUnidadOrganica } from '../services/unidadOrganicaService'
 import { asignarRequerimiento } from '../services/requerimientoService'
+import Icon from '../components/Icon.vue'
 
 const props = defineProps({
   perfil: { type: Object, default: null },
 })
 const emit = defineEmits(['logout'])
 
-// vista: 'requerimientos' = Mis requerimientos (lo que registré), 'pendientes' = Mis pendientes (lo que tengo por resolver)
+// vista: 'requerimientos' = Mis requerimientos, Mis pendientes 
 const vista = ref('requerimientos')
 const activeMenu = ref('Tablero')
 const selectedRequest = ref(null)
 const selectedColumn = ref(null)
 
-const metrics = ref(mockMetrics)
-const columns = ref(mockColumns)
+// Trae los datos del backend.
+const metrics = ref([])
+const columns = ref([])
 const cargando = ref(true)
 const conectado = ref(false)
 const mensajeError = ref('')
 
+// Tarjetas de métricas: al seleccionar una, el tablero solo muestra la
+// columna correspondiente (según el Figma). Vuelve a mostrar todo si se
+// hace clic en la misma métrica de nuevo.
+const metricaSeleccionada = ref(null)
+function alternarMetrica(titulo) {
+  metricaSeleccionada.value =
+    titulo === 'Total' || metricaSeleccionada.value === titulo ? null : titulo
+}
+const columnasVisibles = computed(() =>
+  metricaSeleccionada.value
+    ? columns.value.filter((c) => c.title === metricaSeleccionada.value)
+    : columns.value
+)
+
+// Vista del tablero: 'grid'  o 'list'.
+const vistaTarjetas = ref('grid')
+function cambiarVistaTarjetas(valor) {
+  vistaTarjetas.value = valor
+}
+
+// Colapsar/expandir el menú lateral.
+const sidebarColapsado = ref(false)
+function alternarSidebar() {
+  sidebarColapsado.value = !sidebarColapsado.value
+}
+
 // Menú de perfil (roles del usuario + cerrar sesión)
 const menuAbierto = ref(false)
 const roles = ref([])
-const perfilActivo = ref(null) // rol seleccionado en el desplegable 
+const perfilActivo = ref(null) // rol seleccionado en el desplegable
 
-// Búsqueda avanzada 
+// Búsqueda avanzada
 function hoyISO() {
   return new Date().toISOString().slice(0, 10) // yyyy-MM-dd, formato que espera el backend
 }
 
 const numeroBusqueda = ref('')
 // Por defecto busca lo de hoy para evitar el timeout (15s):
-// sin fecha, el filtro por unidad en el SP recorre toda la tabla sin índice
-// calculando el responsable fila por fila (~12s con 5k filas).
+// El filtro por unidad en el SP recorre toda la tabla sin índice (Aun por evaluar logica)  ***********PENDIENTE***********
+// calculando el responsable fila por fila (~12s con 5k filas) (Desarrollo)
 const fechaInicioBusqueda = ref(hoyISO())
 const fechaFinBusqueda = ref(hoyISO())
 const resultadosBusqueda = ref(null)
 const buscandoAvanzado = ref(false)
 const errorBusquedaAvanzada = ref('')
+
+// Panel "Búsqueda Avanzada" 
+// Los únicos filtros que el backend real soporta hoy son número/título (ya cubierto por el buscador de arriba), 
+// unidad orgánica del responsable (se infiere del rol activo),
+// estado y fechas — el resto (Solicitante, Responsable, Rol, Prioridad,
+// Subestado, Categoría, Subcategoría) se muestra tal como en el Figma pero
+// todavía no se envía al backend porque                                                  ***********PENDIENTE***********`
+const mostrarPanelBusqueda = ref(false)
+const solicitanteFiltro = ref('')
+const responsableFiltro = ref('')
+const rolFiltro = ref('')
+const prioridadFiltro = ref('')
+const estadoFiltro = ref('')
+const subestadoFiltro = ref('')
+const categoriaFiltro = ref('')
+const subcategoriaFiltro = ref('')
+
+const OPCIONES_ESTADO_BUSQUEDA = [
+  { value: ESTADO.REGISTRADO, label: 'Registrado' },
+  { value: ESTADO.POR_ASIGNAR, label: 'Por Asignar' },
+  { value: ESTADO.ASIGNADO, label: 'Asignado' },
+  { value: ESTADO.EN_PROCESO, label: 'En Proceso' },
+  { value: ESTADO.ATENDIDO, label: 'Atendido' },
+  { value: ESTADO.CERRADO_CONFORME, label: 'Cerrado Conforme' },
+  { value: ESTADO.CERRADO_RECHAZADO, label: 'Cerrado Rechazado' },
+  { value: ESTADO.CERRADO_ANULADO, label: 'Cerrado Anulado' },
+  { value: ESTADO.NO_CONFORME, label: 'No Conforme' },
+]
+
+function abrirPanelBusqueda() {
+  mostrarPanelBusqueda.value = true
+}
+function cerrarPanelBusqueda() {
+  mostrarPanelBusqueda.value = false
+}
+function limpiarFiltrosAvanzados() {
+  solicitanteFiltro.value = ''
+  responsableFiltro.value = ''
+  rolFiltro.value = ''
+  prioridadFiltro.value = ''
+  estadoFiltro.value = ''
+  subestadoFiltro.value = ''
+  categoriaFiltro.value = ''
+  subcategoriaFiltro.value = ''
+  fechaInicioBusqueda.value = hoyISO()
+  fechaFinBusqueda.value = hoyISO()
+}
+async function aplicarFiltrosAvanzados() {
+  await ejecutarBusquedaAvanzada()
+  mostrarPanelBusqueda.value = false
+}
+
+// Filtros activos (badge/chips): Solo incluye Estado y Fechas (únicos campos enviados al backend).
+const filtrosActivos = computed(() => {
+  const activos = []
+  if (estadoFiltro.value) {
+    const opcion = OPCIONES_ESTADO_BUSQUEDA.find((o) => String(o.value) === String(estadoFiltro.value))
+    activos.push({ clave: 'estado', etiqueta: `Estado: ${opcion?.label || estadoFiltro.value}` })
+  }
+  // La fecha solo se envía al backend cuando no hay número de requerimiento
+  // (Cambio 11); si hay número, mostrar el chip sería engañoso.
+  const fechaCambiada = fechaInicioBusqueda.value !== hoyISO() || fechaFinBusqueda.value !== hoyISO()
+  if (fechaCambiada && !(Number(numeroBusqueda.value) || 0)) {
+    activos.push({ clave: 'fecha', etiqueta: `Fecha: ${fechaInicioBusqueda.value} a ${fechaFinBusqueda.value}` })
+  }
+  return activos
+})
+
+function quitarFiltroActivo(clave) {
+  if (clave === 'estado') estadoFiltro.value = ''
+  if (clave === 'fecha') {
+    fechaInicioBusqueda.value = hoyISO()
+    fechaFinBusqueda.value = hoyISO()
+  }
+  if (resultadosBusqueda.value !== null) ejecutarBusquedaAvanzada()
+}
 
 const nombreUsuario = computed(() => {
   const nombreCompleto = props.perfil?.nombreCompleto
@@ -66,15 +170,49 @@ const inicialesUsuario = computed(() => {
   return (palabras[0]?.[0] || '') + (palabras[1]?.[0] || '')
 })
 
+// Fecha de hoy para la barra de encabezado (formato dd/mm/aaaa, igual al Figma).
+const fechaHoy = computed(() => new Date().toLocaleDateString('es-PE'))
+
+
+const unidadOrganicaPerfil = computed(() => {
+  const rol = perfilActivo.value
+  if (!rol) return ''
+  return (
+    rol.unidadOrganica ||
+    rol.nombreUnidadOrganica ||
+    rol.descripcionUnidadOrganica ||
+    rol.unidadOrganica?.descripcion ||
+    rol.vDesLuo ||
+    ''
+  )
+})
+
+// Precarga la UO del usuario ({codigoUo, nombreUnidadOrganica}) en "Asignar requerimiento" (permite cambio).
+const unidadOrganicaPropia = computed(() => {
+  const rol = perfilActivo.value
+  if (!rol) return null
+  const codigoUo = rol.codigoUnidadOrganica ?? rol.codigoUo ?? rol.unidadOrganica?.codigo ?? null
+  const nombreUnidadOrganica = unidadOrganicaPerfil.value
+  if (!codigoUo || !nombreUnidadOrganica) return null
+  return { codigoUo, nombreUnidadOrganica }
+})
+
+// Etiqueta de la sección activa para el "eyebrow" sobre el título.
+const seccionActivaLabel = computed(() => {
+  if (vista.value === 'pendientes') return 'Pendientes'
+  if (vista.value === 'requerimientos') return 'Mis requerimientos'
+  if (vista.value === 'mantenimiento') return 'Mantenimientos'
+  if (vista.value === 'documentacion') return 'Documentación'
+  return ''
+})
+
 // Trae los roles activos para el desplegable del avatar.
 async function cargarRolesUsuario() {
   const usuario = props.perfil?.usuarioWindows
   if (!usuario) return
   try {
     roles.value = await listarRoles(usuario)
-    // Por defecto se activa el primer rol de la lista que devuelve el
-    // backend (sin preferencia fija) — el usuario puede cambiarlo desde
-    // el desplegable de "Mis roles".
+    // Rol activo por defecto: primero de la lista del backend. Cambiable en "Mis roles".
     if (!perfilActivo.value && roles.value.length) {
       perfilActivo.value = roles.value[0]
     }
@@ -84,7 +222,7 @@ async function cargarRolesUsuario() {
   }
 }
 
-// Cambia el rol activo desde el desplegable de perfil. 
+// Cambia el rol activo desde el desplegable de perfil.
 function seleccionarRol(rol) {
   perfilActivo.value = rol
   menuAbierto.value = false
@@ -110,10 +248,12 @@ function cerrarSesion() {
 function irARequerimientos(menu) {
   vista.value = 'requerimientos'
   activeMenu.value = menu
+  mostrarNuevoRequerimiento.value = false
 }
 
 function irAPendientes() {
   vista.value = 'pendientes'
+  mostrarNuevoRequerimiento.value = false
 }
 
 function seleccionarRequerimiento(card, column) {
@@ -134,9 +274,50 @@ const puedeDarConformidad = computed(() => {
 })
 
 // -------------------------------------------------------------------------
+// Registro de Requerimiento -- todavía no tiene un endpoint
+// igual que otras acciones de prototipo ya existentes
+// (Mover de estado, Solicitar autorización).
+const mostrarNuevoRequerimiento = ref(false)
+const nuevoTitulo = ref('')
+const nuevoGerencia = ref('')
+const nuevoDivision = ref('')
+const nuevoUnidad = ref('')
+const nuevoCategoria = ref('')
+const nuevoSubcategoria = ref('')
+const nuevoDescripcion = ref('')
+const nuevoPrioridad = ref('normal') // 'normal' | 'alta' | 'urgente'
+const nuevoTipoDato = ref('')
+const nuevoValorDato = ref('')
+const nuevoApellidoPaterno = ref('')
+const LARGO_MAXIMO_DESCRIPCION = 2000
+
+function limpiarFormularioNuevo() {
+  nuevoTitulo.value = ''
+  nuevoGerencia.value = ''
+  nuevoDivision.value = ''
+  nuevoUnidad.value = ''
+  nuevoCategoria.value = ''
+  nuevoSubcategoria.value = ''
+  nuevoDescripcion.value = ''
+  nuevoPrioridad.value = 'normal'
+  nuevoTipoDato.value = ''
+  nuevoValorDato.value = ''
+  nuevoApellidoPaterno.value = ''
+}
+
+function abrirNuevoRequerimiento() {
+  limpiarFormularioNuevo()
+  resultadosBusqueda.value = null
+  mostrarNuevoRequerimiento.value = true
+}
+
+function cerrarNuevoRequerimiento() {
+  mostrarNuevoRequerimiento.value = false
+}
+
+// -------------------------------------------------------------------------
 // Asignar requerimiento: modal + confirmación para el endpoint
-// POST /api/requerimiento/asignar, visible solo en "Pendientes" y solo en estados no cerrados/atendidos 
-// (whitelist de columnas; no cubre aún "Búsqueda avanzada", que no trae el estado real).
+// POST /api/requerimiento/asignar, visible solo en "Pendientes"
 
 const COLUMNAS_PENDIENTES_ASIGNABLES = ['Por asignar', 'Por atender', 'Por autorizar', 'No conforme']
 const puedeAsignar = computed(() =>
@@ -156,18 +337,16 @@ const unidadOrganicaSeleccionada = ref(null)
 const buscandoUnidadOrganica = ref(false)
 let temporizadorBusquedaUo = null
 
-// Personal: se carga recién cuando se elige la Unidad Orgánica 
+// Personal: se carga recién cuando se elige la Unidad Orgánica
 const personas = ref([])
 const personaSeleccionada = ref(null)
 const cargandoPersonas = ref(false)
 
 // Buscador de personas con filtro en memoria sobre la UO seleccionada.
-// El cargo se muestra aparte (solo lectura), no dentro del buscador.
+// El cargo se muestra aparte (lectura), no dentro del buscador.
 const personaTexto = ref('')
 
 const responsablePrincipal = ref(false)
-// 'motivo': Descripción (bInformeTecnico_ReqMov=0).
-// 'informeTecnico': Informe Técnico (bInformeTecnico_ReqMov=1).
 const tipoObservacion = ref('motivo')
 
 // Campo editable en el modal (no hardcodeado).
@@ -193,6 +372,11 @@ function abrirModalAsignar() {
   observacionAsignar.value = ''
   errorAsignacion.value = ''
   mostrarModalAsignar.value = true
+  // Precarga la Unidad Orgánica del usuario logueado por defecto; queda el
+  // link "cambiar" en caso de derivar a otra oficina.
+  if (unidadOrganicaPropia.value) {
+    seleccionarUnidadOrganica(unidadOrganicaPropia.value)
+  }
 }
 
 function cerrarModalAsignar() {
@@ -203,7 +387,7 @@ function cerrarModalAsignar() {
 watch(unidadOrganicaTexto, (texto) => {
   clearTimeout(temporizadorBusquedaUo)
   if (unidadOrganicaSeleccionada.value && texto === unidadOrganicaSeleccionada.value.nombreUnidadOrganica) {
-    return // no relanzar la búsqueda apenas se selecciona una opción
+    return                          // no relanzar la búsqueda apenas se selecciona una opción
   }
   unidadOrganicaSeleccionada.value = null
   personaSeleccionada.value = null
@@ -368,10 +552,12 @@ const mantenimientoActivo = ref(OPCIONES_MANTENIMIENTO_SUPERVISOR[0].id)
 function irAMantenimientos(id) {
   vista.value = 'mantenimiento'
   mantenimientoActivo.value = id || opcionesMantenimientoActivas.value[0]?.id
+  mostrarNuevoRequerimiento.value = false
 }
 
 function irADocumentacion() {
   vista.value = 'documentacion'
+  mostrarNuevoRequerimiento.value = false
 }
 
 async function ejecutarBusquedaAvanzada() {
@@ -383,10 +569,16 @@ async function ejecutarBusquedaAvanzada() {
   }
   if (modoBusqueda.value === 'automatico') {
     filtro.codigoEstado = ESTADO.REGISTRADO                       // no clasificados todavía
-  } else if (modoBusqueda.value === 'manual' && numero === 0) {
-// Filtra por 'hoy' si no hay número; si ingresa número específico, se ignora la fecha.
-    filtro.fechaInicio = fechaInicioBusqueda.value || 'TODO'
-    filtro.fechaFin = fechaFinBusqueda.value || 'TODO'
+  } else {
+    // Filtro manual (panel "Búsqueda Avanzada"): usa el estado elegido si hay uno.
+    if (estadoFiltro.value) {
+      filtro.codigoEstado = Number(estadoFiltro.value)
+    }
+    if (numero === 0) {
+      // Filtra por 'hoy' si no hay número; si ingresa número específico, se ignora la fecha.
+      filtro.fechaInicio = fechaInicioBusqueda.value || 'TODO'
+      filtro.fechaFin = fechaFinBusqueda.value || 'TODO'
+    }
   }
   const resultado = await buscarAvanzado(filtro)
   resultadosBusqueda.value = resultado.cards
@@ -418,15 +610,15 @@ async function refrescar() {
   columns.value = tablero.columns
   conectado.value = tablero.online
   mensajeError.value = tablero.errorMessage || ''
+  metricaSeleccionada.value = null // los datos cambiaron; no arrastrar el filtro anterior
   cargando.value = false
 }
 
-// Resetea la búsqueda avanzada al salir de 'Pendientes' para no arrastrar filtros.
-watch(vista, (nuevaVista) => {
-  if (nuevaVista !== 'pendientes') {
-    resultadosBusqueda.value = null
-    numeroBusqueda.value = ''
-  }
+// Limpia la búsqueda avanzada al cambiar de vista para evitar arrastrar filtros entre secciones.
+watch(vista, () => {
+  resultadosBusqueda.value = null
+  numeroBusqueda.value = ''
+  metricaSeleccionada.value = null
   refrescar()
 })
 
@@ -437,16 +629,378 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="dashboard" :class="{ 'dashboard--detail-open': selectedRequest }">
-    <header class="dashboard-header"><div class="sat-brand"><strong>SAT</strong><span>Servicio de<br>Administracion<br>Tributaria de Lima</span></div><div class="header-actions"><span class="header-system"><span class="header-icon">☷</span>Gestion de Requerimientos</span><button class="bell">♩<b>1</b></button><div class="profile-wrap"><button class="profile-trigger" @click="alternarMenuPerfil"><span class="avatar">{{ inicialesUsuario }}</span><b>⌄</b></button><div v-if="menuAbierto" class="role-menu"><div class="role-menu-header"><strong>{{ nombreUsuario }}</strong><small>{{ perfil?.usuarioWindows }}</small></div><div class="role-menu-section"><span>Mis roles</span><ul><li v-for="r in roles" :key="r.codigoPersonaRol" class="rol-opcion" :class="{ activo: perfilActivo?.codigoPersonaRol === r.codigoPersonaRol }" @click="seleccionarRol(r)">{{ r.nombreRol }}</li><li v-if="!roles.length" class="role-menu-empty">Sin roles activos</li></ul></div><button class="role-menu-logout" @click="cerrarSesion">Cerrar sesión</button></div></div></div></header>
-    <aside class="sidebar"><nav><template v-if="menuSupervisor"><button class="nav-button" :class="{ selected: vista === 'mantenimiento' }" @click="irAMantenimientos()">🛠 <span>Mantenimientos</span></button><button class="nav-button" :class="{ selected: vista === 'documentacion' }" @click="irADocumentacion">📄 <span>Documentación</span></button><button class="nav-button">? <span>Ayuda</span></button></template><template v-else><button class="nav-button" :class="{ selected: vista === 'pendientes' }" @click="irAPendientes">◷ <span>Pendientes</span></button><button class="menu-parent" :class="{ selected: vista === 'requerimientos' }">▣ <span>Mis requerimientos</span><b>⌃</b></button><div class="submenu"><button :class="{ selected: vista === 'requerimientos' && activeMenu === 'Tablero' }" @click="irARequerimientos('Tablero')">▦ <span>Tablero</span></button><button :class="{ selected: vista === 'requerimientos' && activeMenu === 'Listado' }" @click="irARequerimientos('Listado')">☷ <span>Listado</span></button></div><button class="nav-button">▥ <span>Reportes</span></button><button class="nav-button" :class="{ selected: vista === 'mantenimiento' }" @click="irAMantenimientos()">⚒ <span>Incidencias - Mantenimiento</span></button><button class="nav-button">? <span>Ayuda</span></button></template></nav><button class="hide-menu">≪ <span>Ocultar menú</span></button></aside>
-    <section class="dashboard-content"><template v-if="vista === 'requerimientos' || vista === 'pendientes'"><div class="greeting"><h1>Hola, {{ nombreUsuario }} <span>!</span></h1><p v-if="vista === 'pendientes'">Esto es lo que tienes pendiente de resolver (asignado, por dar conformidad o no conforme).</p><p v-else>Gestiona y da seguimiento a los requerimientos que registraste.</p><p v-if="cargando" class="conn-status">Cargando requerimientos…</p><p v-else-if="!conectado" class="conn-status conn-status--offline">⚠ No se pudo conectar con el backend (service-requerimiento)<span v-if="mensajeError">: {{ mensajeError }}</span>. Mostrando datos de referencia. <button @click="refrescar">Reintentar</button></p></div><div class="toolbar"><button class="new-request">＋ Nuevo requerimiento</button><label class="search">⌕<input v-model="numeroBusqueda" placeholder="Buscar por número de requerimiento..." @keyup.enter="vista === 'pendientes' && ejecutarBusquedaAvanzada()"></label><template v-if="vista === 'pendientes'"><template v-if="modoBusqueda === 'manual'"><label class="fecha-filtro">Desde<input type="date" v-model="fechaInicioBusqueda"></label><label class="fecha-filtro">Hasta<input type="date" v-model="fechaFinBusqueda"></label></template><button class="new-request" @click="ejecutarBusquedaAvanzada" :disabled="buscandoAvanzado">⌕ Buscar</button><span v-if="modoBusqueda === 'automatico'" class="modo-busqueda-info">Mostrando automáticamente lo no clasificado de tu unidad (rol Operador)</span><span v-else-if="modoBusqueda === 'manual'" class="modo-busqueda-info">Sin número: por defecto muestra lo registrado hoy en tu gerencia (cambia el rango de fechas o vacíalo para ver otro período). Si buscas un número puntual, la fecha se ignora.</span></template><template v-else><button>⚑ Alta prioridad</button><button>◷ Pendientes de conformidad</button><button>♢ Requiere autorización</button></template></div><template v-if="vista === 'requerimientos' || resultadosBusqueda === null"><section class="metrics"><article v-for="metric in metrics" :key="metric[0]"><span>{{ metric[0] }}</span><strong>{{ metric[1] }}</strong><i :class="metric[2]">{{ metric[2] === 'check' ? '✓' : metric[2] === 'close' ? '×' : metric[2] === 'clock' ? '◷' : metric[2] === 'user' ? '♙' : '▧' }}</i></article></section><div class="board-hint"><span>✥ Arrastra las tarjetas para actualizar el estado</span><button>Ordenar por: <b>Más recientes</b>⌄</button><button>☷</button></div><section class="board"><article v-for="column in columns" :key="column.title" class="board-column"><header :class="column.tone"><strong>{{ column.title }}</strong><b>{{ column.total }}</b></header><div class="cards"><article v-for="card in column.cards" :key="card[0]" class="request-card" @click="seleccionarRequerimiento(card, column)"><div class="card-top"><span>⁝</span><strong>{{ card[0] }}</strong><em :class="card[4].toLowerCase()">{{ card[4] }}</em></div><h3>{{ card[1] }}</h3><p>{{ card[2] }}</p><small>▧ {{ card[3] }} <b>ER</b></small><div class="tags"><span>Autorizado</span><span>Conf. pendiente</span></div></article><p v-if="!column.cards.length" class="empty-column">Sin requerimientos</p></div></article></section></template><template v-else-if="vista === 'pendientes'"><div class="toolbar volver-toolbar"><button class="volver-pill" @click="cerrarBusquedaAvanzada">↩ Volver a {{ vista === 'pendientes' ? 'Mis pendientes' : 'Mis requerimientos' }}</button></div><section v-if="vista === 'pendientes' && resultadosBusqueda !== null" class="busqueda-resultados"><header><strong>Resultados de búsqueda avanzada</strong><button class="cerrar-busqueda" @click="cerrarBusquedaAvanzada">Cerrar ×</button></header><p v-if="buscandoAvanzado" class="conn-status">Buscando…</p><p v-else-if="errorBusquedaAvanzada" class="conn-status conn-status--offline">⚠ {{ errorBusquedaAvanzada }}</p><p v-else-if="!resultadosBusqueda.length" class="empty-column">Sin resultados.</p><div v-else class="cards cards-grid"><article v-for="card in resultadosBusqueda" :key="card[0]" class="request-card" @click="seleccionarRequerimiento(card, { title: 'Búsqueda avanzada' })"><div class="card-top"><span>⁝</span><strong>{{ card[0] }}</strong><em :class="card[4].toLowerCase()">{{ card[4] }}</em></div><h3>{{ card[1] }}</h3><p>{{ card[2] }}</p><small>▧ {{ card[3] }}</small></article></div></section></template></template><template v-else-if="vista === 'mantenimiento'"><div class="greeting"><h1>Mantenimientos <span>!</span></h1><p>Catálogos maestros del sistema (Personas, Categorías, Problemas, Soluciones y sus relaciones).</p></div><div class="toolbar mantenimiento-toolbar"><button v-for="opcion in opcionesMantenimientoActivas" :key="opcion.id" :class="{ selected: mantenimientoActivo === opcion.id }" @click="irAMantenimientos(opcion.id)">{{ opcion.label }}</button></div><section class="mantenimiento-panel"><template v-for="opcion in opcionesMantenimientoActivas" :key="opcion.id"><div v-if="mantenimientoActivo === opcion.id"><h2>{{ opcion.label }}</h2><div class="toolbar"><button class="new-request">＋ Nuevo</button><label class="search">⌕<input placeholder="Buscar..."></label><button>🖶 Imprimir</button></div><p v-if="opcion.backend" class="empty-column">Listado de "{{ opcion.label }}" — pendiente de conectar a los endpoints ya existentes en service-requerimiento.</p><p v-else class="empty-column">"{{ opcion.label }}" tiene SP en el proyecto pero aún no tiene endpoint en service-requerimiento — falta ese trabajo de backend antes de poder listarlo aquí.</p></div></template></section></template><template v-else-if="vista === 'documentacion'"><div class="greeting"><h1>Documentación <span>!</span></h1><p>Procedimientos y manuales del Sistema de Gestión de Requerimientos.</p></div><section class="mantenimiento-panel"><p class="empty-column">Aquí irán los documentos de referencia (Procedimiento del SGR, Manual de usuario). Pendiente de definir si se listan archivos subidos o enlaces.</p></section></template>
-    </section><aside v-if="selectedRequest" class="detail-panel"><button class="close-detail" aria-label="Cerrar detalle" @click="cerrarDetalle">×</button><div class="detail-code"><span>{{ selectedColumn?.title }}</span><b>{{ selectedRequest[0] }}</b></div><h2>{{ selectedRequest[1] }}</h2><dl><div><dt>♙ Área solicitante</dt><dd>{{ selectedRequest[2] }}</dd></div><div><dt>▧ Fecha registrada</dt><dd>{{ selectedRequest[3] }}</dd></div><div><dt>◷ Estado actual</dt><dd class="orange">{{ selectedColumn?.title }}</dd></div></dl><hr><h3>Acciones rápidas</h3><button class="move">▣ Mover de estado <b>›</b></button><button v-if="puedeAsignar" class="asignar" @click="abrirModalAsignar">⇄ Asignar requerimiento</button><button>♢ Solicitar autorización</button><template v-if="puedeDarConformidad"><button class="conformidad-si">✓ Dar conformidad</button><button class="conformidad-no">✕ Dar no conformidad</button></template><button>◷ Ver historial</button></aside>
+  <main class="dashboard" :class="{ 'dashboard--detail-open': selectedRequest, 'sidebar-collapsed': sidebarColapsado }">
 
-<!-- Modal Asignar Requerimiento: simplifica la pantalla legacy omitiendo Descripción y Apellido Paterno -->
+    <!-- Header: marca SAT + fecha + notificaciones + perfil con rol activo -->
+    <header class="dashboard-header">
+      <div class="sat-brand"><strong>SAT</strong><span>Servicio de<br>Administracion<br>Tributaria de Lima</span></div>
+      <h2 class="header-title">Gestión de Requerimientos</h2>
+      <div class="header-actions">
+        <span class="header-date"><Icon name="calendar" :size="15" />{{ fechaHoy }}</span>
+        <button class="bell" aria-label="Notificaciones"><Icon name="bell" :size="17" /><b>1</b></button>
+        <div class="profile-wrap">
+          <button class="profile-trigger" @click="alternarMenuPerfil">
+            <span class="avatar">{{ inicialesUsuario }}</span>
+            <span class="profile-id">
+              <strong>{{ nombreUsuario }}</strong>
+              <span v-if="perfilActivo" class="role-badge">Perfil: {{ perfilActivo.nombreRol }}</span>
+            </span>
+            <Icon name="chevron-down" :size="15" />
+          </button>
+          <div v-if="menuAbierto" class="role-menu">
+            <div class="role-menu-header"><strong>{{ nombreUsuario }}</strong><small>{{ perfil?.usuarioWindows }}</small></div>
+            <div class="role-menu-section">
+              <span>Mis roles</span>
+              <ul>
+                <li v-for="r in roles" :key="r.codigoPersonaRol" class="rol-opcion" :class="{ activo: perfilActivo?.codigoPersonaRol === r.codigoPersonaRol }" @click="seleccionarRol(r)">{{ r.nombreRol }}</li>
+                <li v-if="!roles.length" class="role-menu-empty">Sin roles activos</li>
+              </ul>
+            </div>
+            <button class="role-menu-logout" @click="cerrarSesion">Cerrar sesión</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Barra de contexto: Unidad Orgánica del rol activo + acceso directo a cerrar sesión -->
+    <div class="context-bar">
+      <Icon name="building" :size="14" />
+      <span v-if="unidadOrganicaPerfil">Unidad Orgánica: <strong>{{ unidadOrganicaPerfil }}</strong></span>
+      <span v-else class="context-bar-muted">Unidad Orgánica: <strong>No disponible</strong></span>
+      <span class="context-sep"></span>
+      <button class="logout-link" @click="cerrarSesion"><Icon name="log-out" :size="13" /> Cerrar Sesión</button>
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" :class="{ collapsed: sidebarColapsado }">
+      <nav>
+        <template v-if="menuSupervisor">
+          <p class="nav-section-label">NAVEGACIÓN PRINCIPAL</p>
+          <button class="nav-button" :class="{ selected: vista === 'mantenimiento' }" @click="irAMantenimientos()" title="Mantenimientos"><Icon name="wrench" :size="17" /> <span>Mantenimientos</span></button>
+          <button class="nav-button" :class="{ selected: vista === 'documentacion' }" @click="irADocumentacion" title="Documentación"><Icon name="file-text" :size="17" /> <span>Documentación</span></button>
+          <button class="nav-button" title="Ayuda"><Icon name="help-circle" :size="17" /> <span>Ayuda</span></button>
+        </template>
+        <template v-else>
+          <p class="nav-section-label">NAVEGACIÓN PRINCIPAL</p>
+          <button class="nav-button" :class="{ selected: vista === 'pendientes' }" @click="irAPendientes" title="Mis pendientes">
+            <Icon name="clock" :size="17" /> <span>Mis pendientes</span>
+            <b v-if="vista === 'pendientes'" class="nav-badge">{{ columns.reduce((a, c) => a + c.total, 0) }}</b>
+          </button>
+          <button class="nav-button" :class="{ selected: vista === 'requerimientos' }" @click="irARequerimientos('Tablero')" title="Mis requerimientos">
+            <Icon name="folder" :size="17" /> <span>Mis requerimientos</span>
+            <b v-if="vista === 'requerimientos'" class="nav-badge">{{ columns.reduce((a, c) => a + c.total, 0) }}</b>
+          </button>
+          <p class="nav-section-label">HERRAMIENTAS</p>
+          <button class="nav-button" title="Reportes"><Icon name="bar-chart" :size="17" /> <span>Reportes</span></button>
+          <button class="nav-button" :class="{ selected: vista === 'mantenimiento' }" @click="irAMantenimientos()" title="Incidencias - Mantenimiento"><Icon name="wrench" :size="17" /> <span>Incidencias - Mantenimiento</span></button>
+          <button class="nav-button" title="Ayuda"><Icon name="help-circle" :size="17" /> <span>Ayuda</span></button>
+        </template>
+      </nav>
+      <button class="hide-menu" @click="alternarSidebar">
+        <Icon :name="sidebarColapsado ? 'chevrons-right' : 'chevrons-left'" :size="15" />
+        <span v-if="!sidebarColapsado">Ocultar menú</span>
+      </button>
+    </aside>
+
+    <!-- Contenido -->
+    <section class="dashboard-content">
+      <template v-if="vista === 'requerimientos' || vista === 'pendientes'">
+
+        <!-- Registro de Requerimiento: solo arma la imagen del Figma, -->
+        <!-- "Registrar" queda deshabilitado porque el backend no tiene ese endpoint todavía. -->
+        <template v-if="mostrarNuevoRequerimiento">
+          <button class="detail-back" @click="cerrarNuevoRequerimiento"><Icon name="arrow-left" :size="14" /> Volver al tablero</button>
+          <p class="section-eyebrow" style="margin-top:10px">OPERACIONES · REGISTRO</p>
+          <div class="greeting greeting--form">
+            <div>
+              <h1>Registro de Requerimiento</h1>
+              <p>Completa los datos para registrar un nuevo requerimiento.</p>
+            </div>
+            <div class="form-toolbar">
+              <button class="modal-btn-secundario" @click="limpiarFormularioNuevo">Limpiar</button>
+              <button class="modal-btn-primario" disabled title="Aún no hay un endpoint de registro en service-requerimiento">Registrar</button>
+            </div>
+          </div>
+
+          <div class="nuevo-req-grid">
+            <div class="nuevo-req-col">
+              <div class="detail-card">
+                <h3>Título del Requerimiento *</h3>
+                <p class="form-hint">Describe brevemente el requerimiento en una línea.</p>
+                <input class="form-input-block" v-model="nuevoTitulo" placeholder="Ej: Solicitud de acceso al portal Intrasat...">
+              </div>
+
+              <div class="detail-card">
+                <h3>Unidad Orgánica a quien se solicita</h3>
+                <p class="form-hint">Selecciona la unidad orgánica que atenderá el requerimiento.</p>
+                <div class="modal-grid-2">
+                  <div class="form-field"><label>GERENCIA CENTRAL / GERENCIA *</label><select v-model="nuevoGerencia"><option value="">— Seleccione —</option></select></div>
+                  <div class="form-field"><label>DIVISIÓN / UNIDAD</label><select v-model="nuevoDivision"><option value="">— Seleccione —</option></select></div>
+                  <div class="form-field"><label>UNIDAD</label><select v-model="nuevoUnidad"><option value="">— Seleccione —</option></select></div>
+                  <div class="form-field"><label>CATEGORÍA *</label><select v-model="nuevoCategoria"><option value="">— Seleccione —</option></select></div>
+                </div>
+                <div class="form-field"><label>SUBCATEGORÍA</label><select v-model="nuevoSubcategoria"><option value="">— Seleccione —</option></select></div>
+              </div>
+
+              <div class="detail-card">
+                <div class="detail-card-head"><h3>Descripción del Requerimiento</h3><span class="form-hint">{{ nuevoDescripcion.length }} / {{ LARGO_MAXIMO_DESCRIPCION }}</span></div>
+                <textarea class="form-input-block" v-model="nuevoDescripcion" :maxlength="LARGO_MAXIMO_DESCRIPCION" rows="5" placeholder="Describe detalladamente el requerimiento..."></textarea>
+                <p class="form-hint">Salto de línea: MAYÚS + Enter</p>
+              </div>
+
+              <div class="detail-card">
+                <h3>Documentos Adjuntos</h3>
+                <div class="nota-box">
+                  <strong>Nota:</strong>
+                  <ul><li>Tamaño máximo 10 MB por archivo.</li><li>Seleccionar archivo → Adjuntar. Repetir para más archivos.</li></ul>
+                </div>
+                <div class="adjuntar-row">
+                  <button class="modal-btn-secundario"><Icon name="paperclip" :size="14" /> Seleccionar archivo</button>
+                  <span class="form-hint">Ningún archivo seleccionado</span>
+                  <button class="modal-btn-primario" disabled>Adjuntar</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="nuevo-req-col nuevo-req-col--lateral">
+              <div class="detail-card">
+                <h3>Prioridad</h3>
+                <label class="prioridad-opcion" :class="{ selected: nuevoPrioridad === 'normal' }">
+                  <input type="radio" value="normal" v-model="nuevoPrioridad"> Normal
+                </label>
+                <label class="prioridad-opcion" :class="{ selected: nuevoPrioridad === 'alta' }">
+                  <input type="radio" value="alta" v-model="nuevoPrioridad">
+                  <span class="priority-badge alta"><Icon name="star" :size="10" /> Alta</span>
+                </label>
+                <label class="prioridad-opcion" :class="{ selected: nuevoPrioridad === 'urgente' }">
+                  <input type="radio" value="urgente" v-model="nuevoPrioridad">
+                  <span class="priority-badge urgente"><Icon name="zap" :size="10" /> Urgente</span>
+                </label>
+              </div>
+
+              <div class="detail-card">
+                <h3>Datos Complementarios</h3>
+                <div class="form-field"><label>TIPO DE DATO</label><select v-model="nuevoTipoDato"><option value="">— Seleccione —</option></select></div>
+                <div class="form-field"><label>VALOR</label><input v-model="nuevoValorDato" placeholder="Ingrese el valor..."></div>
+              </div>
+
+              <div class="detail-card">
+                <h3>Correos Copia</h3>
+                <div class="form-field"><label>APELLIDO PATERNO</label><input v-model="nuevoApellidoPaterno" placeholder="Buscar colaborador..."></div>
+                <p class="conn-status">(*) Nota: No aplica para la Gerencia de Asuntos Legales.</p>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Mis requerimientos / Mis pendientes -->
+        <template v-else>
+          <p class="section-eyebrow">{{ (perfilActivo?.nombreRol || 'Usuario').toUpperCase() }} · {{ seccionActivaLabel.toUpperCase() }}</p>
+          <div class="greeting">
+            <h1>Hola, {{ nombreUsuario }} <span>!</span></h1>
+            <p v-if="vista === 'pendientes'">Requerimientos que requieren tu acción{{ perfilActivo ? ` como ${perfilActivo.nombreRol.toLowerCase()}` : '' }}.</p>
+            <p v-else>Gestiona y da seguimiento a los requerimientos que registraste.</p>
+            <p v-if="cargando" class="conn-status">Cargando requerimientos…</p>
+            <p v-else-if="!conectado" class="conn-status conn-status--offline">⚠ No se pudo conectar con el backend (service-requerimiento)<span v-if="mensajeError">: {{ mensajeError }}</span>.<span v-if="vista === 'pendientes'"> Mostrando datos de referencia.</span> <button @click="refrescar">Reintentar</button></p>
+          </div>
+
+          <div class="toolbar">
+            <button class="new-request" @click="abrirNuevoRequerimiento"><Icon name="plus" :size="15" /> Nuevo requerimiento</button>
+            <label class="search"><Icon name="search" :size="16" /><input v-model="numeroBusqueda" placeholder="Buscar por número o título..." @keyup.enter="ejecutarBusquedaAvanzada"></label>
+            <button><Icon name="star" :size="14" /> Alta prioridad</button>
+            <button><Icon name="clock" :size="14" /> Pendientes de conformidad</button>
+            <button><Icon name="shield" :size="14" /> Requiere autorización</button>
+            <button v-if="vista === 'pendientes'" @click="abrirPanelBusqueda">
+              <Icon name="filter" :size="14" /> Búsqueda Avanzada
+              <b v-if="filtrosActivos.length" class="filtro-badge">{{ filtrosActivos.length }}</b>
+            </button>
+            <div class="view-toggle">
+              <button :class="{ selected: vistaTarjetas === 'grid' }" @click="cambiarVistaTarjetas('grid')" aria-label="Vista en tablero"><Icon name="grid" :size="15" /></button>
+              <button :class="{ selected: vistaTarjetas === 'list' }" @click="cambiarVistaTarjetas('list')" aria-label="Vista en lista"><Icon name="list" :size="15" /></button>
+            </div>
+          </div>
+
+          <template v-if="resultadosBusqueda === null">
+            <section class="metrics">
+              <article
+                v-for="metric in metrics"
+                :key="metric[0]"
+                :class="{ selected: metricaSeleccionada === metric[0] }"
+                @click="alternarMetrica(metric[0])"
+              >
+                <i :class="metric[2]"><Icon :name="metric[2] === 'check' ? 'check' : metric[2] === 'close' ? 'x' : metric[2] === 'clock' ? 'clock' : metric[2] === 'user' ? 'user-plus' : metric[2] === 'document' ? 'file-text' : 'folder'" :size="18" /></i>
+                <div><span>{{ metric[0] }}</span><strong>{{ metric[1] }}</strong></div>
+              </article>
+            </section>
+            <p v-if="metricaSeleccionada" class="metrics-filter-hint">Mostrando solo "{{ metricaSeleccionada }}". <button class="volver-pill" @click="alternarMetrica(metricaSeleccionada)"><Icon name="x" :size="12" /> Ver todo</button></p>
+
+            <section class="board" :class="{ 'board--list': vistaTarjetas === 'list' }">
+              <article v-for="column in columnasVisibles" :key="column.title" class="board-column">
+                <header :class="column.tone"><span class="dot"></span><strong>{{ column.title }}</strong><b>{{ column.total }}</b></header>
+                <div class="cards">
+                  <article v-for="card in column.cards" :key="card[0]" class="request-card" @click="seleccionarRequerimiento(card, column)">
+                    <div class="card-top">
+                      <strong>{{ card[0] }}</strong>
+                      <span class="priority-badge" :class="card[4].toLowerCase()">
+                        <Icon v-if="['alta', 'importante'].includes(card[4].toLowerCase())" name="star" :size="10" />
+                        <Icon v-else-if="card[4].toLowerCase() === 'urgente'" name="zap" :size="10" />
+                        {{ card[4] }}
+                      </span>
+                    </div>
+                    <h3>{{ card[1] }}</h3>
+                    <p class="card-area">{{ card[2] }}</p>
+                    <div class="tags"><span>Autorizado</span><span>Conf. pendiente</span></div>
+                    <div class="card-footer">
+                      <span class="card-date"><Icon name="calendar" :size="12" />{{ card[3] }}</span>
+                      <b>ER</b>
+                    </div>
+                  </article>
+                  <p v-if="!column.cards.length" class="empty-column">Sin requerimientos</p>
+                </div>
+              </article>
+            </section>
+          </template>
+
+          <template v-else>
+            <div class="toolbar volver-toolbar">
+              <button class="volver-pill" @click="cerrarBusquedaAvanzada"><Icon name="corner-down-left" :size="14" /> Volver al tablero</button>
+            </div>
+            <div v-if="filtrosActivos.length" class="filtros-chips-row">
+              <span v-if="!buscandoAvanzado && !errorBusquedaAvanzada" class="filtros-chips-count">{{ resultadosBusqueda.length }} resultado{{ resultadosBusqueda.length === 1 ? '' : 's' }}</span>
+              <span v-for="f in filtrosActivos" :key="f.clave" class="filtro-chip">
+                {{ f.etiqueta }}
+                <button type="button" @click="quitarFiltroActivo(f.clave)" aria-label="Quitar filtro"><Icon name="x" :size="10" /></button>
+              </span>
+            </div>
+            <section class="busqueda-resultados">
+              <header><strong>Resultados de búsqueda avanzada</strong><button class="cerrar-busqueda" @click="cerrarBusquedaAvanzada"><Icon name="x" :size="14" /> Cerrar</button></header>
+              <p v-if="buscandoAvanzado" class="conn-status">Buscando…</p>
+              <p v-else-if="errorBusquedaAvanzada" class="conn-status conn-status--offline">⚠ {{ errorBusquedaAvanzada }}</p>
+              <p v-else-if="!resultadosBusqueda.length" class="empty-column">Sin resultados.</p>
+              <div v-else class="cards cards-grid">
+                <article v-for="card in resultadosBusqueda" :key="card[0]" class="request-card" @click="seleccionarRequerimiento(card, { title: 'Búsqueda avanzada' })">
+                  <div class="card-top">
+                    <strong>{{ card[0] }}</strong>
+                    <span class="priority-badge" :class="card[4].toLowerCase()">
+                      <Icon v-if="['alta', 'importante'].includes(card[4].toLowerCase())" name="star" :size="10" />
+                      <Icon v-else-if="card[4].toLowerCase() === 'urgente'" name="zap" :size="10" />
+                      {{ card[4] }}
+                    </span>
+                  </div>
+                  <h3>{{ card[1] }}</h3>
+                  <p class="card-area">{{ card[2] }}</p>
+                  <div class="card-footer"><span class="card-date"><Icon name="calendar" :size="12" />{{ card[3] }}</span></div>
+                </article>
+              </div>
+            </section>
+          </template>
+        </template>
+      </template>
+
+      <template v-else-if="vista === 'mantenimiento'">
+        <p class="section-eyebrow">{{ (perfilActivo?.nombreRol || 'Usuario').toUpperCase() }} · MANTENIMIENTOS</p>
+        <div class="greeting"><h1>Mantenimientos <span>!</span></h1><p>Catálogos maestros del sistema (Personas, Categorías, Problemas, Soluciones y sus relaciones).</p></div>
+        <div class="toolbar mantenimiento-toolbar">
+          <button v-for="opcion in opcionesMantenimientoActivas" :key="opcion.id" :class="{ selected: mantenimientoActivo === opcion.id }" @click="irAMantenimientos(opcion.id)">{{ opcion.label }}</button>
+        </div>
+        <section class="mantenimiento-panel">
+          <template v-for="opcion in opcionesMantenimientoActivas" :key="opcion.id">
+            <div v-if="mantenimientoActivo === opcion.id">
+              <h2>{{ opcion.label }}</h2>
+              <div class="toolbar">
+                <button class="new-request"><Icon name="plus" :size="15" /> Nuevo</button>
+                <label class="search"><Icon name="search" :size="16" /><input placeholder="Buscar..."></label>
+                <button><Icon name="printer" :size="14" /> Imprimir</button>
+              </div>
+              <p v-if="opcion.backend" class="empty-column">Listado de "{{ opcion.label }}" — pendiente de conectar a los endpoints ya existentes en service-requerimiento.</p>
+              <p v-else class="empty-column">"{{ opcion.label }}" tiene SP en el proyecto pero aún no tiene endpoint en service-requerimiento — falta en el backend antes de poder listarlo aquí.</p>
+            </div>
+          </template>
+        </section>
+      </template>
+
+      <template v-else-if="vista === 'documentacion'">
+        <p class="section-eyebrow">{{ (perfilActivo?.nombreRol || 'Usuario').toUpperCase() }} · DOCUMENTACIÓN</p>
+        <div class="greeting"><h1>Documentación <span>!</span></h1><p>Procedimientos y manuales del Sistema de Gestión de Requerimientos.</p></div>
+        <section class="mantenimiento-panel">
+          <p class="empty-column">Aquí irán los documentos de referencia (Procedimiento del SGR, Manual de usuario). </p>
+        </section>
+      </template>
+    </section>
+
+    <!-- Panel de detalle -->
+    <aside v-if="selectedRequest" class="detail-panel">
+      <div class="detail-panel-head">
+        <div>
+          <button class="detail-back" @click="cerrarDetalle"><Icon name="arrow-left" :size="14" /> Volver al tablero</button>
+          <div class="detail-title-row">
+            <b>{{ selectedRequest[0] }}</b>
+            <span class="status-pill" :style="{ color: 'var(--blue)', background: '#eaf0ff' }">{{ selectedColumn?.title }}</span>
+            <span class="priority-badge" :class="selectedRequest[4].toLowerCase()">{{ selectedRequest[4] }}</span>
+          </div>
+          <h2 class="detail-subtitle">{{ selectedRequest[1] }}</h2>
+        </div>
+        <button class="close-detail" aria-label="Cerrar detalle" @click="cerrarDetalle"><Icon name="x" :size="18" /></button>
+      </div>
+
+      <div class="detail-actions">
+        <button class="move"><Icon name="move" :size="14" /> Mover de estado</button>
+        <button v-if="puedeAsignar" class="asignar" @click="abrirModalAsignar"><Icon name="user-plus" :size="14" /> Asignar</button>
+        <button><Icon name="shield" :size="14" /> Solicitar autorización</button>
+        <template v-if="puedeDarConformidad">
+          <button class="conformidad-si"><Icon name="check" :size="14" /> Dar conformidad</button>
+          <button class="conformidad-no"><Icon name="x" :size="14" /> Dar no conformidad</button>
+        </template>
+        <button><Icon name="history" :size="14" /> Ver historial</button>
+      </div>
+
+      <div class="detail-body">
+        <div class="detail-card">
+          <h3>Datos del Requerimiento</h3>
+          <dl class="detail-grid">
+            <div><dt>N° Requerimiento</dt><dd>{{ selectedRequest[0] }}</dd></div>
+            <div><dt>Fecha</dt><dd>{{ selectedRequest[3] }}</dd></div>
+            <div><dt>Estado actual</dt><dd class="orange">{{ selectedColumn?.title }}</dd></div>
+            <div><dt>Prioridad</dt><dd>{{ selectedRequest[4] }}</dd></div>
+            <div style="grid-column:1/-1"><dt>Área solicitante</dt><dd>{{ selectedRequest[2] }}</dd></div>
+          </dl>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Panel "Búsqueda Avanzada" (Cambio 19) -->
+    <div v-if="mostrarPanelBusqueda" class="modal-overlay" @click.self="cerrarPanelBusqueda">
+      <aside class="filtros-panel">
+        <div class="filtros-panel-head">
+          <div><p class="section-eyebrow" style="margin:0">FILTROS</p><h2>Búsqueda Avanzada</h2></div>
+          <button class="close-detail" aria-label="Cerrar" @click="cerrarPanelBusqueda"><Icon name="x" :size="18" /></button>
+        </div>
+        <div class="filtros-panel-body">
+          <div class="form-field"><label>SOLICITANTE</label><input v-model="solicitanteFiltro" placeholder="Buscar usuario..."></div>
+          <div class="form-field"><label>RESPONSABLE</label><input v-model="responsableFiltro" placeholder="Buscar usuario..."></div>
+          <div class="form-field"><label>ROL</label><select v-model="rolFiltro"><option value="">— Todos —</option><option value="Administrador">Administrador</option><option value="Operador">Operador</option><option value="Supervisor">Supervisor</option><option value="Responsable">Responsable</option></select></div>
+          <div class="form-field"><label>PRIORIDAD</label><select v-model="prioridadFiltro"><option value="">— Todos —</option><option value="Alta">Alta</option><option value="Media">Media</option><option value="Baja">Baja</option></select></div>
+          <div class="form-field"><label>ESTADO</label><select v-model="estadoFiltro"><option value="">— Todos —</option><option v-for="op in OPCIONES_ESTADO_BUSQUEDA" :key="op.value" :value="op.value">{{ op.label }}</option></select></div>
+          <div class="form-field"><label>SUBESTADO</label><select v-model="subestadoFiltro"><option value="">— Todos —</option></select></div>
+          <div class="form-field"><label>CATEGORÍA</label><select v-model="categoriaFiltro"><option value="">— Todos —</option></select></div>
+          <div class="form-field"><label>SUBCATEGORÍA</label><select v-model="subcategoriaFiltro"><option value="">— Todos —</option></select></div>
+          <div class="modal-grid-2">
+            <div class="form-field"><label>FECHA DESDE</label><input type="date" v-model="fechaInicioBusqueda"></div>
+            <div class="form-field"><label>FECHA HASTA</label><input type="date" v-model="fechaFinBusqueda"></div>
+          </div>
+          <p class="form-hint">Pendiente de culminar la implementación</p>
+        </div>
+        <div class="filtros-panel-actions">
+          <button class="modal-btn-secundario" @click="limpiarFiltrosAvanzados">Limpiar todo</button>
+          <button class="modal-btn-primario" :disabled="buscandoAvanzado" @click="aplicarFiltrosAvanzados">Aplicar filtros</button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Modal Asignar Requerimiento: simplifica la pantalla legacy omitiendo Descripción y Apellido Paterno -->
     <div v-if="mostrarModalAsignar" class="modal-overlay" @click.self="cerrarModalAsignar">
       <div class="modal-box modal-box--ancho">
-        <button class="close-detail modal-close" aria-label="Cerrar" @click="cerrarModalAsignar">×</button>
+        <button class="close-detail modal-close" aria-label="Cerrar" @click="cerrarModalAsignar"><Icon name="x" :size="18" /></button>
         <h2>Asignar requerimiento</h2>
 
         <div class="modal-grid-2">
@@ -463,8 +1017,7 @@ onMounted(() => {
         <div class="form-field">
           <label>Unidad Orgánica</label>
           <div class="autocomplete">
-            <!-- UO seleccionada: contenedor multilínea con clic para reabrir búsqueda (evita recortes de texto). -->
-            <div
+             <div
               v-if="unidadOrganicaSeleccionada"
               class="campo-confirmado"
               @click="cambiarUnidadOrganica"
