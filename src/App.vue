@@ -8,5 +8,5 @@ const auth = useAuthController()
 
 <template>
   <LoginView v-if="!auth.isAuthenticated.value" :auth="auth" />
-  <DashboardView v-else />
+  <DashboardView v-else :perfil="auth.perfil.value" @logout="auth.logout" />
 </template>
