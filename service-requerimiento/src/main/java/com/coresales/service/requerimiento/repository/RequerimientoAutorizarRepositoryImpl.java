@@ -1,4 +1,5 @@
 package com.coresales.service.requerimiento.repository;
+import com.coresales.service.requerimiento.constant.TipoEvaluacion;
 import com.coresales.service.requerimiento.model.AutorizarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.RequerimientoResultado;
 import com.coresales.service.requerimiento.util.XmlBuilder;
@@ -31,7 +32,7 @@ public class RequerimientoAutorizarRepositoryImpl
                         "siTipBus", NUMERO_DOS,
                         "iCodigo_Req", solicitud.getCodRequerimiento(),
                         "iCodigo_Per", solicitud.getCodPerHelpDesk(),
-                        "iCodigo_TipEva", solicitud.getCodTipEvaluacion().toString(),
+                        "iCodigo_TipEva", TipoEvaluacion.AUTORIZADO,
                         "iCodigo_PerSol_PerAut", solicitud.getCodPerSolAutorizacion().toString(),
                         "iCodigo_PerAnul_PerAut", solicitud.getCodPerSolAutorizacion().toString(),
                         "vCodPerAutorizacion", solicitud.getCodPerAutoriza(),

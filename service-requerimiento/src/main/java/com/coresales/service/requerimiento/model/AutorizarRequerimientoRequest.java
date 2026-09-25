@@ -14,20 +14,18 @@ import jakarta.validation.constraints.NotNull;
 @Setter
 @ToString(callSuper = true)
 public class AutorizarRequerimientoRequest extends BaseAuditoriaRequest {
-
-    @Schema( description = "Código del requerimiento a asignar (iCodigo_Req).",
-            example = "286768" )
-    @Positive(message = "El código de requerimiento debe ser mayor a 0.")
-    @NotNull( message = "El código de requerimiento es obligatorio.")
+        @Schema( description = "Código del requerimiento a asignar (iCodigo_Req).",
+                example = "286768" )
+        @Positive(message = "El código de requerimiento debe ser mayor a 0.")
+        @NotNull( message = "El código de requerimiento es obligatorio.")
     private Integer codRequerimiento;
-    @Schema(description = "Código de la persona que autoriza.",
-            example = "286768")
-    @Positive(message = "El código de Autorizacion debe ser mayor a 0.")
-    @NotNull( message = "El código de Autorizacion es obligatorio.")
+        @Schema(description = "Código de la persona que autoriza.",
+                example = "286768")
+        @Positive(message = "El código de Autorizacion debe ser mayor a 0.")
+        @NotNull( message = "El código de Autorizacion es obligatorio.")
     private String codPerAutoriza;
     private String codPerSolAutorizacion;
     private String codPerSolAnulacion;
-    private Integer codTipEvaluacion;
     private Integer codPerHelpDesk;
     private String observacion;
 }
