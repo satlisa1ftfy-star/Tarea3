@@ -38,8 +38,8 @@ public class SolicitarAutorizaRequerimientoRequest extends BaseAuditoriaRequest 
         @Positive(message = "El Código de la persona de helpdesk debe ser mayor a 0.")
         @NotNull( message = "El Código de la persona de helpdesk es obligatorio.")
     private Integer codPerHelpDesk;
-        @Schema(description = "Observacion es obligatoria,
-                example = "286768")
+        @Schema(description = "Observacion",
+                example = "Se autorizo el RQ")
         @NotNull( message = "La observacion es obligatorio.")
     private String observacion;
 }

@@ -1,5 +1,5 @@
 package com.coresales.service.requerimiento.repository;
-import com.coresales.service.requerimiento.constant.TipoEvaluacion;
+import com.coresales.service.requerimiento.constant.RequerimientoTipos;
 import com.coresales.service.requerimiento.model.AutorizarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.RequerimientoResultado;
 import com.coresales.service.requerimiento.util.XmlBuilder;
@@ -29,10 +29,10 @@ public class RequerimientoAutorizarRepositoryImpl
         String xmlGR = XmlBuilder.elemento(
                 "XmlGR",
                 Map.of(
-                        "siTipBus", NUMERO_DOS,
+                        "siTipBus", RequerimientoTipos.OpcionAutorizar.AUTORIZAR.getCodigo(),
                         "iCodigo_Req", solicitud.getCodRequerimiento(),
                         "iCodigo_Per", solicitud.getCodPerHelpDesk(),
-                        "iCodigo_TipEva", TipoEvaluacion.AUTORIZADO,
+                        "iCodigo_TipEva", RequerimientoTipos.TipoEvaluacion.AUTORIZADO.getCodigo(),
                         "iCodigo_PerSol_PerAut", solicitud.getCodPerSolAutorizacion().toString(),
                         "iCodigo_PerAnul_PerAut", solicitud.getCodPerSolAutorizacion().toString(),
                         "vCodPerAutorizacion", solicitud.getCodPerAutoriza(),
