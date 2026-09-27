@@ -15,4 +15,13 @@ public interface SeguridadRepository {
             String usuarioWindows,
             Integer codigoRol
     );
+
+    // Registra el ingreso con el rol elegido (GRMovAccesos)
+    Integer registrarInicioSesion(
+            Integer codigoPersonaGr,
+            Integer codigoPersonaRol,
+            String codigoSesion,
+            String codigoPersonaActualizacion,
+            String nombreTerminal
+    );
 }

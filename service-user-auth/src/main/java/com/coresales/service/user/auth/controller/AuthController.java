@@ -9,9 +9,13 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 
@@ -66,6 +70,45 @@ public class AuthController {
                         "token", token,
                         "expiresAt", jwtTokenUtil.getExpirationInstant(token).toString(),
                         "perfil", usuarioSesion
+                )
+        );
+    }
+
+    @PostMapping("/sesion")
+    @Operation(
+            summary = "Registrar inicio de sesión con el rol elegido",
+            description = """
+                    Requiere el token de /api/auth/login. Registra el ingreso en GRMovAccesos
+                    (spGR_Seguridad_RegistrarInicioSesion).
+                    """
+    )
+    public ResponseEntity<?> registrarSesion(
+            @RequestBody Map<String, Object> request,
+            Principal principal,
+            HttpServletRequest httpRequest
+    ) {
+
+        Object valor = request.get("codigoPersonaRol");
+        Integer codigoPersonaRol = null;
+
+        if (valor instanceof Number numero) {
+            codigoPersonaRol = numero.intValue();
+        } else if (valor != null && !valor.toString().isBlank()) {
+            try {
+                codigoPersonaRol = Integer.valueOf(valor.toString().trim());
+            } catch (NumberFormatException e) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "codigoPersonaRol debe ser numérico."
+                );
+            }
+        }
+
+        return ResponseEntity.ok(
+                seguridadService.registrarInicioSesion(
+                        principal.getName(),
+                        codigoPersonaRol,
+                        httpRequest.getRemoteAddr()
                 )
         );
     }
