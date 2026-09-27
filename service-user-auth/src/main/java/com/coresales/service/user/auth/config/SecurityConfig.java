@@ -9,6 +9,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  /**
  * Configuración de Spring Security:
  * - /api/auth/** público (login/roles de dominio Windows).
+ * - /api/auth/sesion requiere token (registra el ingreso con el rol elegido).
  */
 
 @Configuration
@@ -24,7 +25,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception{
         http.csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth ->
-                        auth.requestMatchers(
+                        auth.requestMatchers("/api/auth/sesion").authenticated()   // va antes del permitAll
+                                .requestMatchers(
                                         "/api/auth/**",
                                         "/swagger-ui/**",       // Permiten cargar la interfaz gráfica web
                                         "/swagger-ui.html",     // Permiten cargar la interfaz gráfica web

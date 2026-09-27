@@ -8,7 +8,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class SeguridadServiceImpl
@@ -67,6 +70,70 @@ public class SeguridadServiceImpl
                 usuario,
                 codigoRol == null ? 0 : codigoRol
         );
+    }
+
+    /**
+     * Registra el ingreso con el rol elegido (spGR_Seguridad_RegistrarInicioSesion).
+     * El rol debe pertenecer al usuario del token; persona y cCodPer se toman del propio rol.
+     */
+    @Override
+    @Transactional
+    public Map<String, Object> registrarInicioSesion(
+            String usuarioWindows,
+            Integer codigoPersonaRol,
+            String nombreTerminal
+    ) {
+
+        String usuario = normalizar(usuarioWindows);
+
+        if (codigoPersonaRol == null || codigoPersonaRol <= 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Debe indicar el codigoPersonaRol del rol elegido."
+            );
+        }
+
+        UsuarioRolDetalle rol =
+                seguridadRepository.listarRolesUsuario(usuario, 0)
+                        .stream()
+                        .filter(r -> codigoPersonaRol.equals(r.getCodigoPersonaRol()))
+                        .findFirst()
+                        .orElseThrow(() -> new ResponseStatusException(
+                                HttpStatus.FORBIDDEN,
+                                "El rol indicado no pertenece al usuario '" + usuario + "' o no está activo."
+                        ));
+
+        // vCodigoSesion_Ac es Varchar(30)
+        String codigoSesion =
+                UUID.randomUUID().toString().replace("-", "").substring(0, 30);
+
+        Integer codigoIngreso =
+                seguridadRepository.registrarInicioSesion(
+                        rol.getCodigoPersonaGr(),
+                        rol.getCodigoPersonaRol(),
+                        codigoSesion,
+                        rol.getCodigoPersonaOrganizacion(),
+                        recortar(nombreTerminal, 20)   // cNombreTerminal_Ac es Char(20)
+                );
+
+        Map<String, Object> respuesta = new LinkedHashMap<>();
+        respuesta.put("codigoIngreso", codigoIngreso);
+        respuesta.put("codigoSesion", codigoSesion);
+        respuesta.put("codigoPersonaGr", rol.getCodigoPersonaGr());
+        respuesta.put("codigoPersonaRol", rol.getCodigoPersonaRol());
+        respuesta.put("codigoRol", rol.getCodigoRol());
+        respuesta.put("nombreRol", rol.getNombreRol());
+        return respuesta;
+    }
+
+    private String recortar(String valor, int maximo) {
+
+        if (valor == null) {
+            return "";
+        }
+
+        String limpio = valor.trim();
+        return limpio.length() > maximo ? limpio.substring(0, maximo) : limpio;
     }
 
     private String normalizar(String usuarioWindows) {
