@@ -30,8 +30,10 @@ export function createHttpClient(baseUrl) {
       })
     }
 
+    // Con FormData (subida de archivos) el navegador fija el Content-Type con su boundary.
+    const esForm = typeof FormData !== 'undefined' && body instanceof FormData
     const headers = {}
-    if (body) headers['Content-Type'] = 'application/json'
+    if (body && !esForm) headers['Content-Type'] = 'application/json'
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`
 
 // Define un tiempo límite de respuesta (timeout) para evitar bloqueos indefinidos en la interfaz.
@@ -43,7 +45,7 @@ export function createHttpClient(baseUrl) {
       response = await fetch(url, {
         method,
         headers: Object.keys(headers).length ? headers : undefined,
-        body: body ? JSON.stringify(body) : undefined,
+        body: body ? (esForm ? body : JSON.stringify(body)) : undefined,
         signal: controller.signal,
       })
     } catch (error) {
@@ -63,12 +65,15 @@ export function createHttpClient(baseUrl) {
     }
 
     if (response.status === 204) return null
-    return response.json()
+    // Algunos endpoints (p. ej. PUT de clasificación) responden 200 sin cuerpo.
+    const texto = await response.text()
+    return texto ? JSON.parse(texto) : null
   }
 
   return {
     get: (path, params) => request(path, { method: 'GET', params }),
     post: (path, body) => request(path, { method: 'POST', body }),
+    postForm: (path, formData) => request(path, { method: 'POST', body: formData }),
     put: (path, body) => request(path, { method: 'PUT', body }),
     del: (path) => request(path, { method: 'DELETE' }),
     setAuthToken: (token) => { authToken = token },

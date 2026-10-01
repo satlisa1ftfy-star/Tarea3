@@ -6,6 +6,8 @@ import { listarPersonas } from '../services/personaService'
 import { buscarUnidadOrganica } from '../services/unidadOrganicaService'
 import { asignarRequerimiento } from '../services/requerimientoService'
 import Icon from '../components/Icon.vue'
+import NuevoRequerimientoForm from '../components/dashboard/NuevoRequerimientoForm.vue'
+import ClasificarRequerimientoModal from '../components/dashboard/ClasificarRequerimientoModal.vue'
 
 const props = defineProps({
   perfil: { type: Object, default: null },
@@ -274,45 +276,48 @@ const puedeDarConformidad = computed(() => {
 })
 
 // -------------------------------------------------------------------------
-// Registro de Requerimiento -- todavía no tiene un endpoint
-// igual que otras acciones de prototipo ya existentes
-// (Mover de estado, Solicitar autorización).
+// Registro de Requerimiento: la lógica vive en NuevoRequerimientoForm
+// (composable useRegistroRequerimiento). Aquí solo se abre/cierra y se refresca el tablero.
 const mostrarNuevoRequerimiento = ref(false)
-const nuevoTitulo = ref('')
-const nuevoGerencia = ref('')
-const nuevoDivision = ref('')
-const nuevoUnidad = ref('')
-const nuevoCategoria = ref('')
-const nuevoSubcategoria = ref('')
-const nuevoDescripcion = ref('')
-const nuevoPrioridad = ref('normal') // 'normal' | 'alta' | 'urgente'
-const nuevoTipoDato = ref('')
-const nuevoValorDato = ref('')
-const nuevoApellidoPaterno = ref('')
-const LARGO_MAXIMO_DESCRIPCION = 2000
-
-function limpiarFormularioNuevo() {
-  nuevoTitulo.value = ''
-  nuevoGerencia.value = ''
-  nuevoDivision.value = ''
-  nuevoUnidad.value = ''
-  nuevoCategoria.value = ''
-  nuevoSubcategoria.value = ''
-  nuevoDescripcion.value = ''
-  nuevoPrioridad.value = 'normal'
-  nuevoTipoDato.value = ''
-  nuevoValorDato.value = ''
-  nuevoApellidoPaterno.value = ''
-}
 
 function abrirNuevoRequerimiento() {
-  limpiarFormularioNuevo()
   resultadosBusqueda.value = null
   mostrarNuevoRequerimiento.value = true
 }
 
 function cerrarNuevoRequerimiento() {
   mostrarNuevoRequerimiento.value = false
+  recargarListaOperador()
+}
+
+async function alRegistrarRequerimiento() {
+  await refrescar() // el nuevo requerimiento aparece en el tablero al volver
+}
+
+// El Operador en «Mis pendientes» ve su lista automática (sin clasificar); abrir el formulario la
+// descarta, así que se vuelve a cargar al salir de él.
+function recargarListaOperador() {
+  if (vista.value === 'pendientes' && modoBusqueda.value === 'automatico' && resultadosBusqueda.value === null) {
+    ejecutarBusquedaAvanzada()
+  }
+}
+
+// -------------------------------------------------------------------------
+// Clasificar requerimiento (Operador): modal sobre PUT /api/requerimiento/{id}/clasificacion.
+// Solo para requerimientos en estado Registrado (card[5] = codigoEstado).
+const mostrarModalClasificar = ref(false)
+const puedeClasificar = computed(() =>
+  vista.value === 'pendientes' &&
+  perfilActivo.value?.nombreRol === 'Operador' &&
+  selectedRequest.value?.[5] === ESTADO.REGISTRADO
+)
+
+async function alClasificarRequerimiento() {
+  mostrarModalClasificar.value = false
+  cerrarDetalle()
+  // Clasificar no cambia el estado: se vuelve a consultar para reflejar la nueva prioridad/categoría.
+  if (resultadosBusqueda.value !== null) await ejecutarBusquedaAvanzada()
+  else await refrescar()
 }
 
 // -------------------------------------------------------------------------
@@ -569,6 +574,8 @@ async function ejecutarBusquedaAvanzada() {
   }
   if (modoBusqueda.value === 'automatico') {
     filtro.codigoEstado = ESTADO.REGISTRADO                       // no clasificados todavía
+    // Un requerimiento recién registrado aún no tiene responsable: al buscar por número no se filtra por UO.
+    if (numero > 0) filtro.codigoUoResponsable = 0
   } else {
     // Filtro manual (panel "Búsqueda Avanzada"): usa el estado elegido si hay uno.
     if (estadoFiltro.value) {
@@ -706,91 +713,9 @@ onMounted(() => {
     <section class="dashboard-content">
       <template v-if="vista === 'requerimientos' || vista === 'pendientes'">
 
-        <!-- Registro de Requerimiento: solo arma la imagen del Figma, -->
-        <!-- "Registrar" queda deshabilitado porque el backend no tiene ese endpoint todavía. -->
+        <!-- Registro de Requerimiento (lógica en NuevoRequerimientoForm + useRegistroRequerimiento) -->
         <template v-if="mostrarNuevoRequerimiento">
-          <button class="detail-back" @click="cerrarNuevoRequerimiento"><Icon name="arrow-left" :size="14" /> Volver al tablero</button>
-          <p class="section-eyebrow" style="margin-top:10px">OPERACIONES · REGISTRO</p>
-          <div class="greeting greeting--form">
-            <div>
-              <h1>Registro de Requerimiento</h1>
-              <p>Completa los datos para registrar un nuevo requerimiento.</p>
-            </div>
-            <div class="form-toolbar">
-              <button class="modal-btn-secundario" @click="limpiarFormularioNuevo">Limpiar</button>
-              <button class="modal-btn-primario" disabled title="Aún no hay un endpoint de registro en service-requerimiento">Registrar</button>
-            </div>
-          </div>
-
-          <div class="nuevo-req-grid">
-            <div class="nuevo-req-col">
-              <div class="detail-card">
-                <h3>Título del Requerimiento *</h3>
-                <p class="form-hint">Describe brevemente el requerimiento en una línea.</p>
-                <input class="form-input-block" v-model="nuevoTitulo" placeholder="Ej: Solicitud de acceso al portal Intrasat...">
-              </div>
-
-              <div class="detail-card">
-                <h3>Unidad Orgánica a quien se solicita</h3>
-                <p class="form-hint">Selecciona la unidad orgánica que atenderá el requerimiento.</p>
-                <div class="modal-grid-2">
-                  <div class="form-field"><label>GERENCIA CENTRAL / GERENCIA *</label><select v-model="nuevoGerencia"><option value="">— Seleccione —</option></select></div>
-                  <div class="form-field"><label>DIVISIÓN / UNIDAD</label><select v-model="nuevoDivision"><option value="">— Seleccione —</option></select></div>
-                  <div class="form-field"><label>UNIDAD</label><select v-model="nuevoUnidad"><option value="">— Seleccione —</option></select></div>
-                  <div class="form-field"><label>CATEGORÍA *</label><select v-model="nuevoCategoria"><option value="">— Seleccione —</option></select></div>
-                </div>
-                <div class="form-field"><label>SUBCATEGORÍA</label><select v-model="nuevoSubcategoria"><option value="">— Seleccione —</option></select></div>
-              </div>
-
-              <div class="detail-card">
-                <div class="detail-card-head"><h3>Descripción del Requerimiento</h3><span class="form-hint">{{ nuevoDescripcion.length }} / {{ LARGO_MAXIMO_DESCRIPCION }}</span></div>
-                <textarea class="form-input-block" v-model="nuevoDescripcion" :maxlength="LARGO_MAXIMO_DESCRIPCION" rows="5" placeholder="Describe detalladamente el requerimiento..."></textarea>
-                <p class="form-hint">Salto de línea: MAYÚS + Enter</p>
-              </div>
-
-              <div class="detail-card">
-                <h3>Documentos Adjuntos</h3>
-                <div class="nota-box">
-                  <strong>Nota:</strong>
-                  <ul><li>Tamaño máximo 10 MB por archivo.</li><li>Seleccionar archivo → Adjuntar. Repetir para más archivos.</li></ul>
-                </div>
-                <div class="adjuntar-row">
-                  <button class="modal-btn-secundario"><Icon name="paperclip" :size="14" /> Seleccionar archivo</button>
-                  <span class="form-hint">Ningún archivo seleccionado</span>
-                  <button class="modal-btn-primario" disabled>Adjuntar</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="nuevo-req-col nuevo-req-col--lateral">
-              <div class="detail-card">
-                <h3>Prioridad</h3>
-                <label class="prioridad-opcion" :class="{ selected: nuevoPrioridad === 'normal' }">
-                  <input type="radio" value="normal" v-model="nuevoPrioridad"> Normal
-                </label>
-                <label class="prioridad-opcion" :class="{ selected: nuevoPrioridad === 'alta' }">
-                  <input type="radio" value="alta" v-model="nuevoPrioridad">
-                  <span class="priority-badge alta"><Icon name="star" :size="10" /> Alta</span>
-                </label>
-                <label class="prioridad-opcion" :class="{ selected: nuevoPrioridad === 'urgente' }">
-                  <input type="radio" value="urgente" v-model="nuevoPrioridad">
-                  <span class="priority-badge urgente"><Icon name="zap" :size="10" /> Urgente</span>
-                </label>
-              </div>
-
-              <div class="detail-card">
-                <h3>Datos Complementarios</h3>
-                <div class="form-field"><label>TIPO DE DATO</label><select v-model="nuevoTipoDato"><option value="">— Seleccione —</option></select></div>
-                <div class="form-field"><label>VALOR</label><input v-model="nuevoValorDato" placeholder="Ingrese el valor..."></div>
-              </div>
-
-              <div class="detail-card">
-                <h3>Correos Copia</h3>
-                <div class="form-field"><label>APELLIDO PATERNO</label><input v-model="nuevoApellidoPaterno" placeholder="Buscar colaborador..."></div>
-                <p class="conn-status">(*) Nota: No aplica para la Gerencia de Asuntos Legales.</p>
-              </div>
-            </div>
-          </div>
+          <NuevoRequerimientoForm :perfil="perfil" @cerrar="cerrarNuevoRequerimiento" @registrado="alRegistrarRequerimiento" />
         </template>
 
         <!-- Mis requerimientos / Mis pendientes -->
@@ -945,6 +870,7 @@ onMounted(() => {
 
       <div class="detail-actions">
         <button class="move"><Icon name="move" :size="14" /> Mover de estado</button>
+        <button v-if="puedeClasificar" class="asignar" @click="mostrarModalClasificar = true"><Icon name="check" :size="14" /> Clasificar</button>
         <button v-if="puedeAsignar" class="asignar" @click="abrirModalAsignar"><Icon name="user-plus" :size="14" /> Asignar</button>
         <button><Icon name="shield" :size="14" /> Solicitar autorización</button>
         <template v-if="puedeDarConformidad">
@@ -967,6 +893,15 @@ onMounted(() => {
         </div>
       </div>
     </aside>
+
+    <!-- Modal Clasificar Requerimiento (Operador) -->
+    <ClasificarRequerimientoModal
+      v-if="mostrarModalClasificar && codigoRequerimientoSeleccionado()"
+      :codigo-requerimiento="codigoRequerimientoSeleccionado()"
+      :perfil="perfil"
+      @cerrar="mostrarModalClasificar = false"
+      @clasificado="alClasificarRequerimiento"
+    />
 
     <!-- Panel "Búsqueda Avanzada" (Cambio 19) -->
     <div v-if="mostrarPanelBusqueda" class="modal-overlay" @click.self="cerrarPanelBusqueda">

@@ -91,6 +91,7 @@ function aTarjeta(req) {
     req.unidadOrganicaSolicitante || req.unidadOrganicaRequerimiento || '-',
     formatearFecha(req.fechaRegistro),
     req.prioridad || 'Media',
+    req.codigoEstado, // [5] lo usa el botón «Clasificar» (solo estado Registrado)
   ]
 }
 

@@ -17,3 +17,39 @@ export function buscarRequerimientos(filtros = {}) {
 export function asignarRequerimiento(payload) {
   return http.post('/api/requerimiento/asignar', payload)
 }
+
+/**
+ * Registra un requerimiento (POST /api/requerimiento/registrar).
+ * payload: { unidadOrganicaId, divisionId, activoId, categoriaId, subCategoriaId, sumilla, descripcionHtml,
+ *            codigoPersonaSolicitante, codigoPersonaActualizacion, datosComplementarios, personasCopiaCodigos,
+ *            archivosAdjuntos }
+ * Responde { requerimientoId, numeroRequerimiento, fechaRegistro }.
+ */
+export function registrarRequerimiento(payload) {
+  return http.post('/api/requerimiento/registrar', payload)
+}
+
+/**
+ * Sube un archivo a la carpeta temporal; devuelve { archivoTemporalId, nombreOriginal, tamano }.
+ * El archivo se confirma recién al registrar el requerimiento.
+ */
+export function subirAdjuntoTemporal(archivo) {
+  const formData = new FormData()
+  formData.append('file', archivo)
+  return http.postForm('/api/requerimiento/documentos/temporal', formData)
+}
+
+/**
+ * Detalle del requerimiento para clasificar (incluye categoría, prioridad, datos complementarios y adjuntos).
+ */
+export function obtenerParaClasificar(codigoRequerimiento) {
+  return http.get(`/api/requerimiento/${codigoRequerimiento}/para-clasificar`)
+}
+
+/**
+ * Clasifica un requerimiento (PUT /api/requerimiento/{id}/clasificacion).
+ * payload: { categoriaId, subCategoriaId, prioridadId, observacion, codigoPersonaActualizacion }
+ */
+export function clasificarRequerimiento(codigoRequerimiento, payload) {
+  return http.put(`/api/requerimiento/${codigoRequerimiento}/clasificacion`, payload)
+}
