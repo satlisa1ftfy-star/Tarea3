@@ -35,4 +35,16 @@ public class UnidadOrganicaServiceImpl
                         nombre.trim()
                 );
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UnidadOrganica> listarParaSolicitud() {
+        return unidadOrganicaRepository.listarParaSolicitud();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UnidadOrganica> buscarDependencias(Integer codigoUo) {
+        return unidadOrganicaRepository.buscarPorPadre(codigoUo == null ? 0 : codigoUo);
+    }
 }

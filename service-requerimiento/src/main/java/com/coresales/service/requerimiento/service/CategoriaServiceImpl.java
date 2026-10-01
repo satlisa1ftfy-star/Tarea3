@@ -1,5 +1,6 @@
 package com.coresales.service.requerimiento.service;
 
+import com.coresales.service.requerimiento.model.CategoriaActivo;
 import com.coresales.service.requerimiento.model.Categoria;
 import com.coresales.service.requerimiento.repository.CategoriaRepository;
 import org.springframework.stereotype.Service;
@@ -40,5 +41,11 @@ public class CategoriaServiceImpl
                 nombre.trim(),
                 codigoUo
         );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CategoriaActivo> buscarConActivo(Integer codigoUo) {
+        return categoriaRepository.buscarConActivo(codigoUo == null ? 0 : codigoUo);
     }
 }

@@ -10,4 +10,8 @@ public interface IUnidadOrganicaService {
     List<UnidadOrganica> buscar(
             String nombre
     );
+
+    List<UnidadOrganica> listarParaSolicitud();
+
+    List<UnidadOrganica> buscarDependencias(Integer codigoUo);
 }

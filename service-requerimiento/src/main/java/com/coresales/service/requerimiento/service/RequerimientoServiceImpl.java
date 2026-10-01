@@ -1,11 +1,19 @@
 package com.coresales.service.requerimiento.service;
 
+import com.coresales.service.requerimiento.config.DocumentoStorage;
+import com.coresales.service.requerimiento.model.ClasificarRequerimientoRequest;
+import com.coresales.service.requerimiento.model.RegistrarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.Requerimiento;
+import com.coresales.service.requerimiento.model.RequerimientoDetalleDTO;
+import com.coresales.service.requerimiento.model.RequerimientoRegistroResponse;
 import com.coresales.service.requerimiento.repository.RequerimientoRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class RequerimientoServiceImpl
@@ -13,11 +21,15 @@ public class RequerimientoServiceImpl
 
     private final RequerimientoRepository requerimientoRepository;
 
+    private final DocumentoStorage documentoStorage;
+
     public RequerimientoServiceImpl(
-            RequerimientoRepository requerimientoRepository
+            RequerimientoRepository requerimientoRepository,
+            DocumentoStorage documentoStorage
     ) {
         this.requerimientoRepository =
                 requerimientoRepository;
+        this.documentoStorage = documentoStorage;
     }
 
     @Override
@@ -113,5 +125,60 @@ public class RequerimientoServiceImpl
                 codigoEstado,
                 vigencia
         );
+    }
+
+    /**
+     * Registra el requerimiento (spGR_Requerimiento_Registrar, siTipBus = 1) y, si trae adjunto,
+     * mueve el archivo temporal a FileReqN{id}.{ext}. Si el archivo falla, la transacción se revierte.
+     */
+    @Override
+    @Transactional
+    public RequerimientoRegistroResponse registrar(
+            RegistrarRequerimientoRequest solicitud,
+            String ipTerminal
+    ) {
+        if (solicitud == null) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Falta el cuerpo de la solicitud.");
+        }
+
+        String adjuntoTemporal = null;
+        String nombreOriginal = null;
+        if (solicitud.getArchivosAdjuntos() != null && !solicitud.getArchivosAdjuntos().isEmpty()) {
+            Map<String, Object> adjunto = solicitud.getArchivosAdjuntos().get(0);
+            adjuntoTemporal = adjunto.get("archivoTemporalId") == null ? null : adjunto.get("archivoTemporalId").toString();
+            nombreOriginal = adjunto.get("nombreOriginal") == null ? null : adjunto.get("nombreOriginal").toString();
+            if (!documentoStorage.existeTemporal(adjuntoTemporal)) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        HttpStatus.BAD_REQUEST, "El archivo adjunto no existe o expiró; vuelva a adjuntarlo.");
+            }
+        }
+
+        RequerimientoRegistroResponse respuesta = requerimientoRepository.registrar(solicitud, ipTerminal);
+
+        if (adjuntoTemporal != null) {
+            String nombreFinal = "FileReqN" + respuesta.getRequerimientoId() + DocumentoStorage.extension(nombreOriginal);
+            try {
+                documentoStorage.confirmar(adjuntoTemporal, nombreFinal);
+            } catch (IOException e) {
+                throw new IllegalStateException("No se pudo guardar el archivo adjunto: " + e.getMessage(), e);
+            }
+        }
+        return respuesta;
+    }
+
+    @Override
+    @Transactional
+    public boolean clasificar(
+            ClasificarRequerimientoRequest solicitud,
+            String ipTerminal
+    ) {
+        return requerimientoRepository.clasificar(solicitud, ipTerminal);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RequerimientoDetalleDTO obtenerParaClasificar(Integer id) {
+        return requerimientoRepository.obtenerParaClasificar(id);
     }
 }

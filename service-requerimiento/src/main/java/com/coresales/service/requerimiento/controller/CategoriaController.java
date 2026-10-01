@@ -1,6 +1,7 @@
 package com.coresales.service.requerimiento.controller;
 
 
+import com.coresales.service.requerimiento.model.CategoriaActivo;
 import com.coresales.service.requerimiento.model.Categoria;
 import com.coresales.service.requerimiento.service.ICategoriaService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -65,5 +66,18 @@ public class CategoriaController {
                         codigoUo
                 )
         );
+    }
+
+    @GetMapping("/categorias-activo")
+    @Operation(
+            summary = "Categorías con su tipo de activo",
+            description = "Lista las categorías vigentes de una unidad orgánica junto con el activo al que pertenecen "
+                    + "(spGR_Categoria_Consultar siTipBus=3). Lo usa el registro de requerimientos."
+    )
+    public ResponseEntity<List<CategoriaActivo>> buscarConActivo(
+            @Parameter(description = "Código (iCodUO) de la unidad orgánica. 0 = todas.", example = "0")
+            @RequestParam(required = false, defaultValue = "0") Integer codigoUo
+    ) {
+        return ResponseEntity.ok(categoriaService.buscarConActivo(codigoUo));
     }
 }

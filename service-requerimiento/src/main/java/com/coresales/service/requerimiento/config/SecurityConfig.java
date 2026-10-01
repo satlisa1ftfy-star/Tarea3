@@ -27,6 +27,8 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth ->
                         auth.requestMatchers(
+                                        // sin esto, un error (400/500) reenviado a /error se ve como 403
+                                        "/error",
                                         "/swagger-ui/**",
                                         "/swagger-ui.html",
                                         "/v3/api-docs/**",

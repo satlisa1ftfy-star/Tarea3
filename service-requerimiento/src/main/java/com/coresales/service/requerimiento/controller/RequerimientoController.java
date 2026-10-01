@@ -1,8 +1,12 @@
 package com.coresales.service.requerimiento.controller;
 
 import com.coresales.service.requerimiento.model.AsignarRequerimientoRequest;
+import com.coresales.service.requerimiento.model.ClasificarRequerimientoRequest;
+import com.coresales.service.requerimiento.model.RegistrarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.Requerimiento;
 import com.coresales.service.requerimiento.model.RequerimientoAsignado;
+import com.coresales.service.requerimiento.model.RequerimientoDetalleDTO;
+import com.coresales.service.requerimiento.model.RequerimientoRegistroResponse;
 import com.coresales.service.requerimiento.service.IRequerimientoAsignacionService;
 import com.coresales.service.requerimiento.service.IRequerimientoService;
 
@@ -203,6 +207,54 @@ public class RequerimientoController {
                         ipCliente
                 )
         );
+    }
+
+    @PostMapping("/registrar")
+    @Operation(
+            summary = "Registrar requerimiento",
+            description = "Registra un nuevo requerimiento mediante spGR_Requerimiento_Registrar (siTipBus = 1)."
+    )
+    public ResponseEntity<RequerimientoRegistroResponse> registrar(
+            @RequestBody
+            RegistrarRequerimientoRequest solicitud,
+            HttpServletRequest httpRequest
+    ) {
+        return ResponseEntity.ok(
+                requerimientoService.registrar(solicitud, obtenerIpCliente(httpRequest))
+        );
+    }
+
+    @GetMapping("/{id}/para-clasificar")
+    @Operation(
+            summary = "Obtener requerimiento para clasificar",
+            description = "Detalle completo del requerimiento mediante spGR_Requerimiento_Consultar (siTipBus = 2 y 3)."
+    )
+    public ResponseEntity<RequerimientoDetalleDTO> obtenerParaClasificar(
+            @PathVariable Integer id
+    ) {
+        RequerimientoDetalleDTO detalle = requerimientoService.obtenerParaClasificar(id);
+
+        if (detalle == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok(detalle);
+    }
+
+    @PutMapping("/{id}/clasificacion")
+    @Operation(
+            summary = "Clasificar requerimiento",
+            description = "Actualiza la clasificación técnica mediante spGR_Requerimiento_Registrar (siTipBus = 2)."
+    )
+    public ResponseEntity<Void> clasificar(
+            @PathVariable Integer id,
+            @RequestBody
+            ClasificarRequerimientoRequest solicitud,
+            HttpServletRequest httpRequest
+    ) {
+        solicitud.setRequerimientoId(id);
+        requerimientoService.clasificar(solicitud, obtenerIpCliente(httpRequest));
+        return ResponseEntity.ok().build();
     }
 
     /**
