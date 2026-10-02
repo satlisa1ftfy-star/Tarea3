@@ -13,7 +13,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/requerimiento/documentos")
-@CrossOrigin("http://localhost:5173")
+@CrossOrigin({"http://localhost:5173", "http://localhost:5174"})
 @Tag(name = "Gestión de Requerimientos", description = "Servicios de Gestión de Requerimientos")
 public class DocumentoController {
 
