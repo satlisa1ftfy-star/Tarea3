@@ -15,7 +15,7 @@ import java.util.List;
 @CrossOrigin("http://localhost:5173")
 @Tag(
         name = "Organización",
-        description = "Consulta de unidades orgánicas y personas"
+        description = "Consulta de unidades orgánicas y personal (BD Organizacion)"
 )
 public class UnidadOrganicaController {
 
