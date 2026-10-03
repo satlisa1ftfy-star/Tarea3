@@ -1,6 +1,7 @@
 package com.coresales.service.user.auth.config;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
@@ -31,12 +32,19 @@ public class JwtTokenUtil {
                 .compact();
     }
 
+    /**
+     * Devuelve false (en vez de lanzar excepción) si el token está mal formado,
+     * expirado o con firma inválida; así el filtro deja la petición sin
+     * autenticar y Spring Security responde 401.
+     */
     public boolean validateToken(String token){
-        Jwts.parserBuilder().setSigningKey(key)
-                .build().parseClaimsJws(token)
-                .getBody().getSubject();
-
-        return true;
+        try {
+            Jwts.parserBuilder().setSigningKey(key)
+                    .build().parseClaimsJws(token);
+            return true;
+        } catch (JwtException | IllegalArgumentException e) {
+            return false;
+        }
     }
 
     public String getUsernameFromToken(String token){
