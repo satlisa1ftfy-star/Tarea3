@@ -4,6 +4,16 @@ API REST desarrollada con Spring Boot para la gestión y consulta de requerimien
 
 El proyecto permite consultar información de requerimientos, personas, unidades orgánicas, categorías, subcategorías, estados y roles mediante procedimientos almacenados de SQL Server.
 
+## Microservicios
+
+| Servicio | Puerto | Base path | Responsabilidad |
+|---|---|---|---|
+| `service-user-auth` | 8081 | `/api/auth` | Login (usuario Windows), emisión del JWT, roles y registro de sesión |
+| `service-organizacion` | 8082 | `/api/organizacion` | Búsqueda de unidades orgánicas y personas |
+| `service-requerimiento` | 8080 | `/api/requerimiento` | Requerimientos, categorías, subcategorías y estados |
+
+`service-organizacion` y `service-requerimiento` validan el mismo JWT: `JWT_SECRET` debe ser igual en los tres servicios.
+
 ## Tecnologías
 
 - Java 17

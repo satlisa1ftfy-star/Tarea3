@@ -17,11 +17,11 @@ import io.swagger.v3.oas.annotations.Parameter;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/personas")
+@RequestMapping("/api/requerimiento")
 @CrossOrigin("http://localhost:5173")
 @Tag(
-        name = "Personas",
-        description = "Consulta de personas de Gestión de Requerimientos"
+        name = "Gestión de Requerimientos",
+        description = "Servicios de Gestión de Requerimientos"
 )
 public class PersonaController {
 
@@ -34,11 +34,12 @@ public class PersonaController {
                 personaService;
     }
 
-    @GetMapping
+    @GetMapping("/buscarNombre")
     @Operation(
             summary = "Buscar personas",
             description = """
-                    Busca personas por nombre, unidad orgánica y vigencia.
+                    Busca personas GR (GRMaePersona, BD GestionRQLD) por nombre,
+                    unidad orgánica y vigencia. SP: spGR_Persona_ConsultarNombreUO.
 
                     Vigencia:
                     1 = Vigente

@@ -26,7 +26,7 @@ public class AsignarRequerimientoRequest {
     @Schema(
             description = "Código de persona del responsable " +
                     "destino, a quién se asigna (cCodPer). Es el mismo dato " +
-                    "que 'codigoPersona' en GET /api/personas.",
+                    "que 'codigoPersona' en GET /api/requerimiento/buscarNombre.",
             example = "0035"
     )
     private String codigoPersonaResponsable;
@@ -55,7 +55,7 @@ public class AsignarRequerimientoRequest {
             description = "Código de persona de quien ejecuta " +
                     "la acción, para auditoría (cCodPerActualizacion). Es el propio " +
                     "'codigoPersona' del usuario logueado (el mismo dato que " +
-                    "'codigoPersona' en GET /api/personas, pero de sí mismo).",
+                    "'codigoPersona' en GET /api/requerimiento/buscarNombre, pero de sí mismo).",
             example = "0027"
     )
     private String codigoPersonaActualizacion;
