@@ -1,83 +1,79 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { ESTADO, buscarAvanzado, cargarPendientes, cargarTablero } from '../models/dashboard'
-import { listarRoles } from '../services/seguridadService'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  ESTADO, PESTANAS, buscarAvanzado, cargarNoClasificados, cargarPestanas, construirTablero, repartirResultados,
+  formatearFechaHora, htmlATexto,
+} from '../models/dashboard'
+import { listarRoles, registrarSesion } from '../services/seguridadService'
 import { listarPersonas } from '../services/personaService'
 import { buscarUnidadOrganica } from '../services/unidadOrganicaService'
-import { asignarRequerimiento } from '../services/requerimientoService'
+import {
+  asignarRequerimiento, consultarAdjuntosRequerimiento, consultarDetalleRequerimiento, consultarHistorialRequerimiento,
+} from '../services/requerimientoService'
+import { buscarCategorias, buscarSubcategorias } from '../services/categoriaService'
 import Icon from '../components/Icon.vue'
+import Paginador from '../components/Paginador.vue'
 
 const props = defineProps({
   perfil: { type: Object, default: null },
 })
 const emit = defineEmits(['logout'])
 
-// vista: 'requerimientos' = Mis requerimientos, Mis pendientes 
+// vista: 'requerimientos' (tablero con subpestañas) | 'mantenimiento' | 'documentacion'
 const vista = ref('requerimientos')
-const activeMenu = ref('Tablero')
+// Subpestaña activa del tablero (Figma): otros | noClasificados | pendientes | mis
+const pestana = ref('mis')
 const selectedRequest = ref(null)
 const selectedColumn = ref(null)
+const vistaDetalle = ref(false) // true = vista completa "Detalle de requerimiento" (Figma)
 
-// Trae los datos del backend.
-const metrics = ref([])
-const columns = ref([])
+// Datos propios del usuario por subpestaña (sin filtros).
+const datos = ref({ mis: [], pendientes: [], noClasificados: [] })
 const cargando = ref(true)
 const conectado = ref(false)
 const mensajeError = ref('')
 
-// Tarjetas de métricas: al seleccionar una, el tablero solo muestra la
-// columna correspondiente (según el Figma). Vuelve a mostrar todo si se
-// hace clic en la misma métrica de nuevo.
+// Tarjetas de métricas: al seleccionar una, el tablero solo muestra esa columna.
 const metricaSeleccionada = ref(null)
 function alternarMetrica(titulo) {
-  metricaSeleccionada.value =
-    titulo === 'Total' || metricaSeleccionada.value === titulo ? null : titulo
+  metricaSeleccionada.value = metricaSeleccionada.value === titulo ? null : titulo
 }
-const columnasVisibles = computed(() =>
-  metricaSeleccionada.value
-    ? columns.value.filter((c) => c.title === metricaSeleccionada.value)
-    : columns.value
-)
 
-// Vista del tablero: 'grid'  o 'list'.
+// Vista del tablero: 'grid' o 'list'.
 const vistaTarjetas = ref('grid')
 function cambiarVistaTarjetas(valor) {
   vistaTarjetas.value = valor
 }
 
-// Colapsar/expandir el menú lateral.
+// Colapsar/expandir el menú lateral (botón hamburguesa del header).
 const sidebarColapsado = ref(false)
 function alternarSidebar() {
   sidebarColapsado.value = !sidebarColapsado.value
 }
+const mantenimientoAbierto = ref(true) // submenú "Mantenimiento" del sidebar
 
 // Menú de perfil (roles del usuario + cerrar sesión)
 const menuAbierto = ref(false)
 const roles = ref([])
 const perfilActivo = ref(null) // rol seleccionado en el desplegable
 
-// Búsqueda avanzada
+// -------------------------------------------------------------------------
+// Búsqueda (buscador por número + panel "Búsqueda Avanzada")
+
+// Fecha local yyyy-MM-dd (toISOString usaría UTC: después de las 19:00 en Lima daría mañana).
 function hoyISO() {
-  return new Date().toISOString().slice(0, 10) // yyyy-MM-dd, formato que espera el backend
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
-const numeroBusqueda = ref('')
-// Por defecto busca lo de hoy para evitar el timeout (15s):
-// El filtro por unidad en el SP recorre toda la tabla sin índice (Aun por evaluar logica)  ***********PENDIENTE***********
-// calculando el responsable fila por fila (~12s con 5k filas) (Desarrollo)
-const fechaInicioBusqueda = ref(hoyISO())
-const fechaFinBusqueda = ref(hoyISO())
-const resultadosBusqueda = ref(null)
-const buscandoAvanzado = ref(false)
-const errorBusquedaAvanzada = ref('')
+// Solo dígitos: acepta "287273" (o "REQ-287273" si lo pegan así).
+function soloNumero(texto) {
+  return Number(String(texto || '').replace(/\D/g, '')) || 0
+}
 
-// Panel "Búsqueda Avanzada" 
-// Los únicos filtros que el backend real soporta hoy son número/título (ya cubierto por el buscador de arriba), 
-// unidad orgánica del responsable (se infiere del rol activo),
-// estado y fechas — el resto (Solicitante, Responsable, Rol, Prioridad,
-// Subestado, Categoría, Subcategoría) se muestra tal como en el Figma pero
-// todavía no se envía al backend porque                                                  ***********PENDIENTE***********`
-const mostrarPanelBusqueda = ref(false)
+// Borrador (lo que está escrito en el panel / buscador). La fecha por defecto es solo hoy.
+const numeroBusqueda = ref('')
 const solicitanteFiltro = ref('')
 const responsableFiltro = ref('')
 const rolFiltro = ref('')
@@ -86,26 +82,70 @@ const estadoFiltro = ref('')
 const subestadoFiltro = ref('')
 const categoriaFiltro = ref('')
 const subcategoriaFiltro = ref('')
+const fechaInicioBusqueda = ref(hoyISO())
+const fechaFinBusqueda = ref(hoyISO())
+
+// Filtros aplicados (copia del borrador al presionar "Aplicar filtros" o Enter). null = sin búsqueda.
+const filtrosAplicados = ref(null)
+const resultadosBusqueda = ref([]) // filas devueltas por /buscar para los filtros aplicados
+const buscandoAvanzado = ref(false)
+const errorBusquedaAvanzada = ref('')
+const mostrarPanelBusqueda = ref(false)
 
 const OPCIONES_ESTADO_BUSQUEDA = [
-  { value: ESTADO.REGISTRADO, label: 'Registrado' },
-  { value: ESTADO.POR_ASIGNAR, label: 'Por Asignar' },
-  { value: ESTADO.ASIGNADO, label: 'Asignado' },
-  { value: ESTADO.EN_PROCESO, label: 'En Proceso' },
-  { value: ESTADO.ATENDIDO, label: 'Atendido' },
-  { value: ESTADO.CERRADO_CONFORME, label: 'Cerrado Conforme' },
-  { value: ESTADO.CERRADO_RECHAZADO, label: 'Cerrado Rechazado' },
-  { value: ESTADO.CERRADO_ANULADO, label: 'Cerrado Anulado' },
-  { value: ESTADO.NO_CONFORME, label: 'No Conforme' },
+  { value: ESTADO.REGISTRADO, label: 'Registrados' },
+  { value: ESTADO.POR_ASIGNAR, label: 'Por asignar' },
+  { value: ESTADO.ASIGNADO, label: 'Asignados' },
+  { value: ESTADO.EN_PROCESO, label: 'En proceso' },
+  { value: ESTADO.ATENDIDO, label: 'Atendidos' },
+  { value: ESTADO.NO_CONFORME, label: 'No conforme' },
+  { value: ESTADO.CERRADO_CONFORME, label: 'Cerrado conforme' },
+  { value: ESTADO.CERRADO_RECHAZADO, label: 'Cerrado rechazado' },
+  { value: ESTADO.CERRADO_ANULADO, label: 'Cerrado anulado' },
+  { value: ESTADO.CERRADO_NO_AUTORIZADO, label: 'Cerrado no autorizado' },
+  { value: ESTADO.CERRADO_POR_SISTEMA, label: 'Cerrado por el sistema' },
+  { value: ESTADO.CERRADO_POR_REVERSION, label: 'Cerrado por reversión' },
 ]
 
+// Catálogos del panel (se cargan al abrirlo por primera vez).
+const categorias = ref([])
+const subcategorias = ref([])
+async function cargarCategorias() {
+  if (categorias.value.length) return
+  try {
+    categorias.value = await buscarCategorias()
+  } catch (error) {
+    console.error('No se pudieron cargar las categorías.', error)
+  }
+}
+watch(categoriaFiltro, async (codigo) => {
+  subcategoriaFiltro.value = ''
+  subcategorias.value = []
+  if (!codigo) return
+  try {
+    subcategorias.value = await buscarSubcategorias(codigo)
+  } catch (error) {
+    console.error('No se pudieron cargar las subcategorías.', error)
+  }
+})
+
+// Prioridades: las que vienen en los datos (no hay catálogo en el backend).
+const opcionesPrioridad = computed(() => {
+  const todas = [...datos.value.mis, ...datos.value.pendientes, ...datos.value.noClasificados, ...resultadosBusqueda.value]
+  const valores = [...new Set(todas.map((r) => (r.prioridad || '').trim()).filter(Boolean))]
+  return valores.length ? valores.sort() : ['Normal', 'Alta', 'Urgente']
+})
+
 function abrirPanelBusqueda() {
+  cargarCategorias()
   mostrarPanelBusqueda.value = true
 }
 function cerrarPanelBusqueda() {
   mostrarPanelBusqueda.value = false
 }
-function limpiarFiltrosAvanzados() {
+
+function restablecerBorrador() {
+  numeroBusqueda.value = ''
   solicitanteFiltro.value = ''
   responsableFiltro.value = ''
   rolFiltro.value = ''
@@ -117,35 +157,218 @@ function limpiarFiltrosAvanzados() {
   fechaInicioBusqueda.value = hoyISO()
   fechaFinBusqueda.value = hoyISO()
 }
-async function aplicarFiltrosAvanzados() {
-  await ejecutarBusquedaAvanzada()
-  mostrarPanelBusqueda.value = false
+
+// "Limpiar todo": vuelve a los valores por defecto (fecha = hoy) y quita la búsqueda activa.
+function limpiarFiltrosAvanzados() {
+  restablecerBorrador()
+  filtrosAplicados.value = null
+  resultadosBusqueda.value = []
+  errorBusquedaAvanzada.value = ''
 }
 
-// Filtros activos (badge/chips): Solo incluye Estado y Fechas (únicos campos enviados al backend).
+function capturarBorrador() {
+  return {
+    numero: soloNumero(numeroBusqueda.value),
+    solicitante: solicitanteFiltro.value.trim(),
+    responsable: responsableFiltro.value.trim(),
+    prioridad: prioridadFiltro.value,
+    estado: estadoFiltro.value ? Number(estadoFiltro.value) : 0,
+    categoria: categoriaFiltro.value ? Number(categoriaFiltro.value) : 0,
+    subcategoria: subcategoriaFiltro.value ? Number(subcategoriaFiltro.value) : 0,
+    fechaInicio: fechaInicioBusqueda.value || '',
+    fechaFin: fechaFinBusqueda.value || '',
+  }
+}
+
+// Consulta al backend con los filtros que acepta /buscar (número, estado, fechas).
+async function ejecutarBusqueda() {
+  const f = filtrosAplicados.value
+  if (!f) return
+  buscandoAvanzado.value = true
+  errorBusquedaAvanzada.value = ''
+  const resultado = await buscarAvanzado({
+    numero: f.numero,
+    codigoEstado: f.estado,
+    fechaInicio: f.fechaInicio || 'TODO',
+    fechaFin: f.fechaFin || 'TODO',
+  })
+  resultadosBusqueda.value = resultado.requerimientos
+  errorBusquedaAvanzada.value = resultado.online ? '' : (resultado.errorMessage || 'No se pudo buscar.')
+  buscandoAvanzado.value = false
+  irAPestanaConResultados()
+}
+
+async function aplicarFiltrosAvanzados() {
+  filtrosAplicados.value = capturarBorrador()
+  mostrarPanelBusqueda.value = false
+  metricaSeleccionada.value = null
+  await ejecutarBusqueda()
+}
+
+// Buscador junto a "Nuevo requerimiento": solo número de requerimiento.
+async function buscarPorNumero() {
+  const numero = soloNumero(numeroBusqueda.value)
+  if (!numero) {
+    if (filtrosAplicados.value?.numero) quitarFiltroActivo('numero')
+    return
+  }
+  await aplicarFiltrosAvanzados()
+}
+
+// Si la subpestaña actual quedó sin resultados, pasa a la primera que sí tenga.
+function irAPestanaConResultados() {
+  if (conteos.value[pestana.value] > 0) return
+  const conResultados = ['mis', 'pendientes', 'noClasificados', 'otros'].find((id) => conteos.value[id] > 0)
+  if (conResultados) pestana.value = conResultados
+}
+
+// Chips de filtros aplicados (con su "x").
 const filtrosActivos = computed(() => {
+  const f = filtrosAplicados.value
+  if (!f) return []
   const activos = []
-  if (estadoFiltro.value) {
-    const opcion = OPCIONES_ESTADO_BUSQUEDA.find((o) => String(o.value) === String(estadoFiltro.value))
-    activos.push({ clave: 'estado', etiqueta: `Estado: ${opcion?.label || estadoFiltro.value}` })
+  if (f.numero) activos.push({ clave: 'numero', etiqueta: `N°: ${f.numero}` })
+  if (f.solicitante) activos.push({ clave: 'solicitante', etiqueta: `Solicitante: ${f.solicitante}` })
+  if (f.responsable) activos.push({ clave: 'responsable', etiqueta: `Responsable: ${f.responsable}` })
+  if (f.prioridad) activos.push({ clave: 'prioridad', etiqueta: `Prioridad: ${f.prioridad}` })
+  if (f.estado) {
+    const opcion = OPCIONES_ESTADO_BUSQUEDA.find((o) => o.value === f.estado)
+    activos.push({ clave: 'estado', etiqueta: `Estado: ${opcion?.label || f.estado}` })
   }
-  // La fecha solo se envía al backend cuando no hay número de requerimiento
-  // (Cambio 11); si hay número, mostrar el chip sería engañoso.
-  const fechaCambiada = fechaInicioBusqueda.value !== hoyISO() || fechaFinBusqueda.value !== hoyISO()
-  if (fechaCambiada && !(Number(numeroBusqueda.value) || 0)) {
-    activos.push({ clave: 'fecha', etiqueta: `Fecha: ${fechaInicioBusqueda.value} a ${fechaFinBusqueda.value}` })
+  if (f.categoria) {
+    const cat = categorias.value.find((c) => c.codigoCategoria === f.categoria)
+    activos.push({ clave: 'categoria', etiqueta: `Categoría: ${cat?.nombreCategoria || f.categoria}` })
   }
+  if (f.subcategoria) {
+    const sub = subcategorias.value.find((s) => s.codigoSubcategoria === f.subcategoria)
+    activos.push({ clave: 'subcategoria', etiqueta: `Subcategoría: ${sub?.nombreSubcategoria || f.subcategoria}` })
+  }
+  // Con número la fecha no se envía (Cambio 11): mostrar el chip sería engañoso.
+  if (!f.numero && f.fechaInicio) activos.push({ clave: 'fechaInicio', etiqueta: `Desde: ${f.fechaInicio}` })
+  if (!f.numero && f.fechaFin) activos.push({ clave: 'fechaFin', etiqueta: `Hasta: ${f.fechaFin}` })
   return activos
 })
 
+const CLAVES_BACKEND = ['numero', 'estado', 'fechaInicio', 'fechaFin']
+
 function quitarFiltroActivo(clave) {
-  if (clave === 'estado') estadoFiltro.value = ''
-  if (clave === 'fecha') {
-    fechaInicioBusqueda.value = hoyISO()
-    fechaFinBusqueda.value = hoyISO()
+  const f = filtrosAplicados.value
+  if (!f) return
+  const vacio = { numero: 0, solicitante: '', responsable: '', prioridad: '', estado: 0, categoria: 0, subcategoria: 0, fechaInicio: '', fechaFin: '' }
+  filtrosAplicados.value = { ...f, [clave]: vacio[clave] }
+  if (clave === 'categoria') filtrosAplicados.value.subcategoria = 0
+  // Mantiene el panel sincronizado con lo aplicado.
+  const borrador = {
+    numero: numeroBusqueda, solicitante: solicitanteFiltro, responsable: responsableFiltro, prioridad: prioridadFiltro,
+    estado: estadoFiltro, categoria: categoriaFiltro, subcategoria: subcategoriaFiltro,
+    fechaInicio: fechaInicioBusqueda, fechaFin: fechaFinBusqueda,
   }
-  if (resultadosBusqueda.value !== null) ejecutarBusquedaAvanzada()
+  borrador[clave].value = ''
+  // Sin filtros, o si al quitar el N° solo quedan las fechas por defecto: se limpia la búsqueda.
+  const soloFechas = filtrosActivos.value.every((c) => c.clave === 'fechaInicio' || c.clave === 'fechaFin')
+  if (!filtrosActivos.value.length || (clave === 'numero' && soloFechas)) {
+    limpiarFiltrosAvanzados()
+    return
+  }
+  if (CLAVES_BACKEND.includes(clave)) ejecutarBusqueda()
 }
+
+// Accesos rápidos del toolbar (sobre la subpestaña visible).
+const soloAltaPrioridad = ref(false)
+const soloConfPendiente = ref(false)
+function cumpleAccesosRapidos(r) {
+  if (soloAltaPrioridad.value && !/alta|urgente/i.test(r.prioridad || '')) return false
+  if (soloConfPendiente.value && r.codigoEstado !== ESTADO.ATENDIDO) return false
+  return true
+}
+
+// -------------------------------------------------------------------------
+// Reparto por subpestaña
+
+const codigoUoActiva = computed(() => perfilActivo.value?.codigoUnidadOrganica || 0)
+
+// Todos los iCodigo_Per con los que el usuario registró (el SP ya los expande por DNI).
+const codigosSolicitante = computed(() => {
+  const set = new Set(datos.value.mis.map((r) => r.codigoPersonaSolicitante))
+  if (props.perfil?.codigoPersonaGr) set.add(props.perfil.codigoPersonaGr)
+  return set
+})
+
+// Con filtros: cada pestaña es un subconjunto de su propio total (ver repartirResultados).
+const requerimientosPorPestana = computed(() => {
+  const f = filtrosAplicados.value
+  const base = f
+    ? repartirResultados(datos.value, resultadosBusqueda.value, f)
+    : { ...datos.value, otros: [] }
+  const salida = {}
+  Object.keys(base).forEach((id) => { salida[id] = base[id].filter(cumpleAccesosRapidos) })
+  return salida
+})
+
+// Número en el círculo de cada subpestaña (con búsqueda: lo encontrado en cada una).
+const conteos = computed(() => {
+  const r = requerimientosPorPestana.value
+  return { otros: r.otros.length, noClasificados: r.noClasificados.length, pendientes: r.pendientes.length, mis: r.mis.length }
+})
+
+// Total de la búsqueda = requerimientos distintos entre las 4 pestañas (uno puede estar en dos).
+const totalResultados = computed(() => {
+  if (!filtrosAplicados.value) return 0
+  const r = requerimientosPorPestana.value
+  return new Set([...r.mis, ...r.pendientes, ...r.noClasificados, ...r.otros].map((x) => x.codigoRequerimiento)).size
+})
+
+const tablero = computed(() => construirTablero(pestana.value, requerimientosPorPestana.value[pestana.value]))
+const columnasVisibles = computed(() =>
+  metricaSeleccionada.value
+    ? tablero.value.columns.filter((c) => c.title === metricaSeleccionada.value)
+    : tablero.value.columns
+)
+
+// Paginación (Figma): tablero 10 por columna, lista (tabla) 15.
+const TAM_PAGINA_TABLERO = 10
+const TAM_PAGINA_LISTA = 15
+const paginasColumna = ref({})
+const paginaLista = ref(1)
+function paginaColumna(column) {
+  const total = Math.max(1, Math.ceil(column.total / TAM_PAGINA_TABLERO))
+  return Math.min(paginasColumna.value[column.title] || 1, total)
+}
+function cambiarPaginaColumna(column, n) {
+  paginasColumna.value = { ...paginasColumna.value, [column.title]: n }
+}
+function tarjetasPagina(column) {
+  const p = paginaColumna(column)
+  return column.cards.slice((p - 1) * TAM_PAGINA_TABLERO, p * TAM_PAGINA_TABLERO)
+}
+const filasVisibles = computed(() =>
+  metricaSeleccionada.value ? tablero.value.filas.filter((f) => f.grupo === metricaSeleccionada.value) : tablero.value.filas
+)
+const paginaListaActual = computed(() =>
+  Math.min(paginaLista.value, Math.max(1, Math.ceil(filasVisibles.value.length / TAM_PAGINA_LISTA)))
+)
+const filasPagina = computed(() =>
+  filasVisibles.value.slice((paginaListaActual.value - 1) * TAM_PAGINA_LISTA, paginaListaActual.value * TAM_PAGINA_LISTA)
+)
+// Vuelve a la página 1 cuando cambian los datos, la pestaña, el filtro de métrica o la vista.
+// Se compara por los números de la pestaña actual: la actualización automática de
+// "No clasificados" no debe regresar a la página 1 si lo visible no cambió.
+const firmaTablero = computed(() =>
+  `${pestana.value}|${(requerimientosPorPestana.value[pestana.value] || []).map((r) => r.codigoRequerimiento).join(',')}`
+)
+watch([firmaTablero, metricaSeleccionada, vistaTarjetas], () => {
+  paginasColumna.value = {}
+  paginaLista.value = 1
+})
+
+function cambiarPestana(id) {
+  pestana.value = id
+  metricaSeleccionada.value = null
+  cerrarDetalle()
+}
+
+// -------------------------------------------------------------------------
+// Perfil
 
 const nombreUsuario = computed(() => {
   const nombreCompleto = props.perfil?.nombreCompleto
@@ -167,12 +390,11 @@ const inicialesUsuario = computed(() => {
   const nombreCompleto = props.perfil?.nombreCompleto
   if (!nombreCompleto) return '--'
   const palabras = nombreCompleto.trim().split(/\s+/)
-  return (palabras[0]?.[0] || '') + (palabras[1]?.[0] || '')
+  return ((palabras[2]?.[0] || palabras[0]?.[0] || '') + (palabras[0]?.[0] || '')).toUpperCase()
 })
 
-// Fecha de hoy para la barra de encabezado (formato dd/mm/aaaa, igual al Figma).
-const fechaHoy = computed(() => new Date().toLocaleDateString('es-PE'))
-
+// Fecha de hoy para el header (dd/mm/aaaa, igual al Figma).
+const fechaHoy = computed(() => new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' }))
 
 const unidadOrganicaPerfil = computed(() => {
   const rol = perfilActivo.value
@@ -197,15 +419,6 @@ const unidadOrganicaPropia = computed(() => {
   return { codigoUo, nombreUnidadOrganica }
 })
 
-// Etiqueta de la sección activa para el "eyebrow" sobre el título.
-const seccionActivaLabel = computed(() => {
-  if (vista.value === 'pendientes') return 'Pendientes'
-  if (vista.value === 'requerimientos') return 'Mis requerimientos'
-  if (vista.value === 'mantenimiento') return 'Mantenimientos'
-  if (vista.value === 'documentacion') return 'Documentación'
-  return ''
-})
-
 // Trae los roles activos para el desplegable del avatar.
 async function cargarRolesUsuario() {
   const usuario = props.perfil?.usuarioWindows
@@ -215,6 +428,7 @@ async function cargarRolesUsuario() {
     // Rol activo por defecto: primero de la lista del backend. Cambiable en "Mis roles".
     if (!perfilActivo.value && roles.value.length) {
       perfilActivo.value = roles.value[0]
+      registrarIngresoRol(perfilActivo.value)
     }
   } catch (error) {
     console.error('No se pudieron cargar los roles del usuario.', error)
@@ -224,7 +438,9 @@ async function cargarRolesUsuario() {
 
 // Cambia el rol activo desde el desplegable de perfil.
 function seleccionarRol(rol) {
+  const cambioDeRol = perfilActivo.value?.codigoPersonaRol !== rol.codigoPersonaRol
   perfilActivo.value = rol
+  if (cambioDeRol) registrarIngresoRol(rol)
   menuAbierto.value = false
   mantenimientoActivo.value = opcionesMantenimientoActivas.value[0]?.id
   if (rol.nombreRol === 'Supervisor') {
@@ -233,6 +449,16 @@ function seleccionarRol(rol) {
     }
   } else if (vista.value === 'documentacion') {
     vista.value = 'requerimientos'
+  }
+}
+
+// Registra el ingreso con el rol activo (como el sistema legado). No bloquea la pantalla si falla.
+async function registrarIngresoRol(rol) {
+  if (!rol?.codigoPersonaRol) return
+  try {
+    await registrarSesion(rol.codigoPersonaRol)
+  } catch (error) {
+    console.error('No se pudo registrar el inicio de sesión del rol.', error)
   }
 }
 
@@ -245,15 +471,10 @@ function cerrarSesion() {
   emit('logout')
 }
 
-function irARequerimientos(menu) {
+function irARequerimientos() {
   vista.value = 'requerimientos'
-  activeMenu.value = menu
   mostrarNuevoRequerimiento.value = false
-}
-
-function irAPendientes() {
-  vista.value = 'pendientes'
-  mostrarNuevoRequerimiento.value = false
+  cerrarDetalle()
 }
 
 function seleccionarRequerimiento(card, column) {
@@ -261,24 +482,141 @@ function seleccionarRequerimiento(card, column) {
   selectedColumn.value = column
 }
 
+// Clic en la tarjeta o en la fila: abre la vista completa de detalle (ya no el panel lateral).
+function abrirDetalle(card, column, seccion = null) {
+  seleccionarRequerimiento(card, column || { title: card.grupo })
+  observacionDetalle.value = ''
+  vistaDetalle.value = true
+  cargarDetalleCompleto(card.codigo)
+  window.scrollTo({ top: 0 })
+  if (seccion) setTimeout(() => document.getElementById(seccion)?.scrollIntoView({ behavior: 'smooth' }), 50)
+}
+
 function cerrarDetalle() {
   selectedRequest.value = null
   selectedColumn.value = null
+  vistaDetalle.value = false
+  consultaDetalleId++
+  detalleExtra.value = null
+  historialDetalle.value = []
+  adjuntosDetalle.value = []
 }
 
-// La conformidad se evalúa sobre requerimientos Atendidos
-// se solicita automáticamente por correo al llegar a Atendido.
-const puedeDarConformidad = computed(() => {
-  const titulo = selectedColumn.value?.title
-  return titulo === 'Atendido' || titulo === 'Por dar conformidad'
+const observacionDetalle = ref('')
+
+// Datos completos del detalle (legado): medio de envío, correos copia, historial, etc.
+const detalleExtra = ref(null)
+const historialDetalle = ref([])
+const adjuntosDetalle = ref([])
+const cargandoDetalle = ref(false)
+const errorDetalle = ref('')
+let consultaDetalleId = 0
+async function cargarDetalleCompleto(codigo) {
+  const id = ++consultaDetalleId // descarta respuestas de un detalle anterior
+  detalleExtra.value = null
+  historialDetalle.value = []
+  adjuntosDetalle.value = []
+  errorDetalle.value = ''
+  cargandoDetalle.value = true
+  const [detalle, historial, adjuntos] = await Promise.allSettled([
+    consultarDetalleRequerimiento(codigo),
+    consultarHistorialRequerimiento(codigo),
+    consultarAdjuntosRequerimiento(codigo),
+  ])
+  if (id !== consultaDetalleId) return
+  if (detalle.status === 'fulfilled') detalleExtra.value = detalle.value
+  if (historial.status === 'fulfilled') historialDetalle.value = historial.value || []
+  if (adjuntos.status === 'fulfilled') adjuntosDetalle.value = adjuntos.value || []
+  const fallo = [detalle, historial, adjuntos].find((r) => r.status === 'rejected')
+  if (fallo) {
+    console.error('No se pudo cargar el detalle completo.', fallo.reason)
+    errorDetalle.value = fallo.reason?.message || 'No se pudo cargar el detalle completo.'
+  }
+  cargandoDetalle.value = false
+}
+
+// Valor del detalle del legado; si no vino, el de la tarjeta (de /buscar).
+function dato(campo, respaldo = null) {
+  const valor = detalleExtra.value?.[campo]
+  return valor !== undefined && valor !== null && valor !== '' ? valor : respaldo
+}
+const descripcionDetalle = computed(() => {
+  const html = detalleExtra.value?.descripcion
+  return (html ? htmlATexto(html) : selectedRequest.value?.descripcion) || 'Sin descripción.'
 })
+const responsableDetalle = computed(() => {
+  const nombre = dato('responsable', selectedRequest.value?.responsable)
+  if (!nombre) return 'Sin asignar'
+  return detalleExtra.value?.responsablePrincipal ? `${nombre} (PRINCIPAL)` : nombre
+})
+const inicialesSolicitanteDetalle = computed(() => {
+  const p = String(dato('solicitante', selectedRequest.value?.solicitante) || '').trim().split(/\s+/).filter(Boolean)
+  return p.length ? ((p[0][0] || '') + (p[1]?.[0] || '')).toUpperCase() : '--'
+})
+function imprimirDetalle() {
+  window.print()
+}
+
+// Conformidad: solo el solicitante, sobre un requerimiento Atendido
+// (se solicita automáticamente por correo al llegar a Atendido).
+const puedeDarConformidad = computed(() => {
+  const r = selectedRequest.value
+  return !!r && r.codigoEstado === ESTADO.ATENDIDO && codigosSolicitante.value.has(r.raw?.codigoPersonaSolicitante)
+})
+
+// Botón inferior de la tarjeta (Figma): "Dar conformidad" en Mis requerimientos, "Asignar" en Por asignar.
+function accionTarjeta(card, grupo) {
+  if (pestana.value === 'mis' && card.codigoEstado === ESTADO.ATENDIDO) return 'conformidad'
+  if (pestana.value === 'pendientes' && grupo === 'Por asignar') return 'asignar'
+  return null
+}
+// Columna "Acción" de la tabla: además, "Adjuntar archivo" en mis requerimientos pendientes (Figma).
+function accionFila(fila) {
+  return accionTarjeta(fila, fila.grupo) || (pestana.value === 'mis' && fila.grupo === 'Pendientes' ? 'adjuntar' : null)
+}
+function ejecutarAccionTarjeta(card, grupo) {
+  const accion = grupo === undefined ? accionFila(card) : accionTarjeta(card, grupo)
+  if (accion === 'asignar') {
+    seleccionarRequerimiento(card, { title: grupo || card.grupo })
+    abrirModalAsignar()
+  } else if (accion === 'adjuntar') {
+    abrirDetalle(card, null, 'detalle-adjuntos')
+  } else {
+    abrirDetalle(card, { title: grupo || card.grupo })
+  }
+}
+
+function tonoEstado(codigo) {
+  return {
+    [ESTADO.REGISTRADO]: 'gris', [ESTADO.POR_ASIGNAR]: 'ambar', [ESTADO.ASIGNADO]: 'verde',
+    [ESTADO.EN_PROCESO]: 'azul', [ESTADO.ATENDIDO]: 'azul', [ESTADO.NO_CONFORME]: 'rojo',
+  }[codigo] || 'gris'
+}
+
+// Etiquetas de la tarjeta según el estado real del requerimiento.
+function etiquetasTarjeta(card) {
+  if (pestana.value === 'noClasificados') return [{ texto: 'Por clasificar', tono: 'gris' }]
+  const tono = tonoEstado(card.codigoEstado)
+  const etiquetas = card.estado ? [{ texto: card.estado, tono }] : []
+  if (card.codigoEstado === ESTADO.ATENDIDO && pestana.value !== 'mis') etiquetas.push({ texto: 'Conf. pendiente', tono: 'ambar' })
+  return etiquetas
+}
+
+function iconoPrioridad(prioridad) {
+  const p = (prioridad || '').toLowerCase()
+  if (p.includes('urgente')) return 'zap'
+  if (p.includes('alta') || p.includes('importante')) return 'star'
+  return null
+}
+function clasePrioridad(prioridad) {
+  return (prioridad || 'normal').toLowerCase().split(/\s+/)[0]
+}
 
 // -------------------------------------------------------------------------
 // Registro de Requerimiento -- todavía no tiene un endpoint
 // igual que otras acciones de prototipo ya existentes
 // (Mover de estado, Solicitar autorización).
 const mostrarNuevoRequerimiento = ref(false)
-const nuevoTitulo = ref('')
 const nuevoGerencia = ref('')
 const nuevoDivision = ref('')
 const nuevoUnidad = ref('')
@@ -292,7 +630,6 @@ const nuevoApellidoPaterno = ref('')
 const LARGO_MAXIMO_DESCRIPCION = 2000
 
 function limpiarFormularioNuevo() {
-  nuevoTitulo.value = ''
   nuevoGerencia.value = ''
   nuevoDivision.value = ''
   nuevoUnidad.value = ''
@@ -307,7 +644,7 @@ function limpiarFormularioNuevo() {
 
 function abrirNuevoRequerimiento() {
   limpiarFormularioNuevo()
-  resultadosBusqueda.value = null
+  cerrarDetalle()
   mostrarNuevoRequerimiento.value = true
 }
 
@@ -319,9 +656,11 @@ function cerrarNuevoRequerimiento() {
 // Asignar requerimiento: modal + confirmación para el endpoint
 // POST /api/requerimiento/asignar, visible solo en "Pendientes"
 
-const COLUMNAS_PENDIENTES_ASIGNABLES = ['Por asignar', 'Por atender', 'Por autorizar', 'No conforme']
+// Solo en "Mis pendientes" y mientras no esté Atendido/Cerrado (lista blanca por código de estado).
+const ESTADOS_ASIGNABLES = [ESTADO.REGISTRADO, ESTADO.POR_ASIGNAR, ESTADO.ASIGNADO, ESTADO.EN_PROCESO, ESTADO.NO_CONFORME]
 const puedeAsignar = computed(() =>
-  vista.value === 'pendientes' && COLUMNAS_PENDIENTES_ASIGNABLES.includes(selectedColumn.value?.title)
+  vista.value === 'requerimientos' && pestana.value === 'pendientes' &&
+  ESTADOS_ASIGNABLES.includes(selectedRequest.value?.codigoEstado)
 )
 
 const mostrarModalAsignar = ref(false)
@@ -354,10 +693,7 @@ const observacionAsignar = ref('')
 const LARGO_MAXIMO_OBSERVACION = 2000 // Nota del sistema antiguo: máx. 2000 caracteres
 
 function codigoRequerimientoSeleccionado() {
-  const numero = selectedRequest.value?.[0]
-  if (!numero) return null
-  const soloDigitos = String(numero).replace(/\D/g, '')
-  return soloDigitos ? Number(soloDigitos) : null
+  return selectedRequest.value?.codigo ?? null
 }
 
 function abrirModalAsignar() {
@@ -510,21 +846,11 @@ async function confirmarAsignacion() {
   }
 }
 
-// Carga según rol activo: Administrador usa búsqueda manual; Operador autocarga
-const modoBusqueda = computed(() => {
-  const rol = perfilActivo.value?.nombreRol
-  if (rol === 'Administrador') return 'manual'
-  if (rol === 'Operador') return 'automatico'
-  return null
-})
-// Usa la UO del rol activo como aproximación (el SP solo filtra por UO solicitante/responsable).
-const unidadOrganicaBusqueda = computed(() => perfilActivo.value?.codigoUnidadOrganica || 0)
-
 // Supervisor:
 const menuSupervisor = computed(() => perfilActivo.value?.nombreRol === 'Supervisor')
 
-// Toolbar de Mantenimientos: Supervisor ve el catálogo completo;
-// Administrador ve solo un subconjunto (Problema/Solución). Backend activo en 4 opciones.
+// Mantenimientos: Supervisor ve el catálogo completo; Administrador (y demás roles)
+// el submenú del Figma: Personas, Problemas y soluciones, Categorías.
 const OPCIONES_MANTENIMIENTO_SUPERVISOR = [
   { id: 'personas', label: 'Personas', backend: true },
   { id: 'categorias', label: 'Categorías', backend: true },
@@ -538,106 +864,98 @@ const OPCIONES_MANTENIMIENTO_SUPERVISOR = [
   { id: 'categoriaSubcategoria', label: 'Relación Categoría - SubCategoría', backend: false },
 ]
 const OPCIONES_MANTENIMIENTO_ADMINISTRADOR = [
-  { id: 'problemas', label: 'Problemas', backend: false },
-  { id: 'soluciones', label: 'Soluciones', backend: false },
-  { id: 'problemaSolucion', label: 'Relación Problema - Solución', backend: false },
+  { id: 'personas', label: 'Personas', backend: true },
+  { id: 'problemasSoluciones', label: 'Problemas y soluciones', backend: false },
+  { id: 'categorias', label: 'Categorías', backend: true },
 ]
 const opcionesMantenimientoActivas = computed(() =>
-  perfilActivo.value?.nombreRol === 'Administrador'
-    ? OPCIONES_MANTENIMIENTO_ADMINISTRADOR
-    : OPCIONES_MANTENIMIENTO_SUPERVISOR
+  menuSupervisor.value ? OPCIONES_MANTENIMIENTO_SUPERVISOR : OPCIONES_MANTENIMIENTO_ADMINISTRADOR
 )
-const mantenimientoActivo = ref(OPCIONES_MANTENIMIENTO_SUPERVISOR[0].id)
+const mantenimientoActivo = ref(OPCIONES_MANTENIMIENTO_ADMINISTRADOR[0].id)
 
 function irAMantenimientos(id) {
   vista.value = 'mantenimiento'
   mantenimientoActivo.value = id || opcionesMantenimientoActivas.value[0]?.id
   mostrarNuevoRequerimiento.value = false
+  cerrarDetalle()
 }
 
 function irADocumentacion() {
   vista.value = 'documentacion'
   mostrarNuevoRequerimiento.value = false
+  cerrarDetalle()
 }
 
-async function ejecutarBusquedaAvanzada() {
-  buscandoAvanzado.value = true
-  const numero = Number(numeroBusqueda.value) || 0
-  const filtro = {
-    codigoUoResponsable: unidadOrganicaBusqueda.value,
-    numero,
-  }
-  if (modoBusqueda.value === 'automatico') {
-    filtro.codigoEstado = ESTADO.REGISTRADO                       // no clasificados todavía
-  } else {
-    // Filtro manual (panel "Búsqueda Avanzada"): usa el estado elegido si hay uno.
-    if (estadoFiltro.value) {
-      filtro.codigoEstado = Number(estadoFiltro.value)
-    }
-    if (numero === 0) {
-      // Filtra por 'hoy' si no hay número; si ingresa número específico, se ignora la fecha.
-      filtro.fechaInicio = fechaInicioBusqueda.value || 'TODO'
-      filtro.fechaFin = fechaFinBusqueda.value || 'TODO'
-    }
-  }
-  const resultado = await buscarAvanzado(filtro)
-  resultadosBusqueda.value = resultado.cards
-  errorBusquedaAvanzada.value = resultado.online ? '' : (resultado.errorMessage || 'No se pudo buscar.')
-  buscandoAvanzado.value = false
-}
-
-function cerrarBusquedaAvanzada() {
-  resultadosBusqueda.value = null
-  numeroBusqueda.value = ''
-  fechaInicioBusqueda.value = hoyISO()
-  fechaFinBusqueda.value = hoyISO()
-}
-
-// El Operador no usa la lupa: en cuanto se conocen sus roles y está en
-// 'Mis pendientes', se carga solo.
-watch([roles, vista], () => {
-  if (vista.value === 'pendientes' && modoBusqueda.value === 'automatico' && resultadosBusqueda.value === null) {
-    ejecutarBusquedaAvanzada()
-  }
-})
-
+// Recarga las subpestañas (y la búsqueda activa, si hay).
 async function refrescar() {
   cargando.value = true
-  const tablero = vista.value === 'pendientes'
-    ? await cargarPendientes(props.perfil)
-    : await cargarTablero(props.perfil)
-  metrics.value = tablero.metrics
-  columns.value = tablero.columns
-  conectado.value = tablero.online
-  mensajeError.value = tablero.errorMessage || ''
-  metricaSeleccionada.value = null // los datos cambiaron; no arrastrar el filtro anterior
+  const resultado = await cargarPestanas(props.perfil, codigoUoActiva.value)
+  datos.value = { mis: resultado.mis, pendientes: resultado.pendientes, noClasificados: resultado.noClasificados }
+  conectado.value = resultado.online
+  mensajeError.value = resultado.errorMessage || ''
+  metricaSeleccionada.value = null
   cargando.value = false
+  if (filtrosAplicados.value) await ejecutarBusqueda()
 }
 
-// Limpia la búsqueda avanzada al cambiar de vista para evitar arrastrar filtros entre secciones.
-watch(vista, () => {
-  resultadosBusqueda.value = null
-  numeroBusqueda.value = ''
-  metricaSeleccionada.value = null
+// "No clasificados" depende de la UO del rol activo: recarga si cambia de rol.
+let inicializado = false
+watch(codigoUoActiva, () => { if (inicializado) refrescar() }, { flush: 'sync' })
+
+// No clasificados en automático: cada 15 s y al volver a la pestaña del navegador.
+// Solo esa consulta y sin "Cargando…", para no interrumpir lo que el usuario está viendo.
+const INTERVALO_NO_CLASIFICADOS_MS = 15000
+let temporizadorNoClasificados = null
+let consultandoNoClasificados = false
+
+async function actualizarNoClasificados() {
+  if (!inicializado || cargando.value || consultandoNoClasificados || document.hidden) return
+  consultandoNoClasificados = true
+  const uo = codigoUoActiva.value
+  try {
+    const lista = (await cargarNoClasificados(uo)) || []
+    const firma = (l) => l.map((r) => `${r.codigoRequerimiento}:${r.codigoEstado}`).join(',')
+    // Solo si hubo cambios; si cambió de rol mientras consultaba se descarta (refrescar trae la UO nueva).
+    if (uo === codigoUoActiva.value && firma(lista) !== firma(datos.value.noClasificados)) {
+      datos.value = { ...datos.value, noClasificados: lista }
+    }
+  } catch (e) {
+    console.error('No se pudo actualizar No clasificados.', e)
+  } finally {
+    consultandoNoClasificados = false
+  }
+}
+
+function alCambiarVisibilidad() {
+  if (!document.hidden) actualizarNoClasificados()
+}
+
+// Primero el rol activo (da la UO) y luego las subpestañas: evita cargar dos veces.
+onMounted(async () => {
+  await cargarRolesUsuario()
+  inicializado = true
   refrescar()
+  temporizadorNoClasificados = setInterval(actualizarNoClasificados, INTERVALO_NO_CLASIFICADOS_MS)
+  document.addEventListener('visibilitychange', alCambiarVisibilidad)
 })
 
-onMounted(() => {
-  refrescar()
-  cargarRolesUsuario()
+onBeforeUnmount(() => {
+  clearInterval(temporizadorNoClasificados)
+  document.removeEventListener('visibilitychange', alCambiarVisibilidad)
 })
 </script>
 
 <template>
-  <main class="dashboard" :class="{ 'dashboard--detail-open': selectedRequest, 'sidebar-collapsed': sidebarColapsado }">
+  <main class="dashboard" :class="{ 'sidebar-collapsed': sidebarColapsado }">
 
-    <!-- Header: marca SAT + fecha + notificaciones + perfil con rol activo -->
+    <!-- Header (Figma): menú + marca SAT | fecha, título, notificaciones, perfil con rol activo -->
     <header class="dashboard-header">
-      <div class="sat-brand"><strong>SAT</strong><span>Servicio de<br>Administracion<br>Tributaria de Lima</span></div>
-      <h2 class="header-title">Gestión de Requerimientos</h2>
+      <button class="hamburger" aria-label="Mostrar u ocultar menú" @click="alternarSidebar"><Icon name="menu" :size="20" /></button>
+      <div class="sat-brand"><strong>SAT</strong><span>Servicio de<br>Administración<br>Tributaria de Lima</span></div>
       <div class="header-actions">
         <span class="header-date"><Icon name="calendar" :size="15" />{{ fechaHoy }}</span>
-        <button class="bell" aria-label="Notificaciones"><Icon name="bell" :size="17" /><b>1</b></button>
+        <span class="header-title">Gestión de Requerimientos</span>
+        <button class="bell" aria-label="Notificaciones"><Icon name="bell" :size="18" /><b>1</b></button>
         <div class="profile-wrap">
           <button class="profile-trigger" @click="alternarMenuPerfil">
             <span class="avatar">{{ inicialesUsuario }}</span>
@@ -648,7 +966,10 @@ onMounted(() => {
             <Icon name="chevron-down" :size="15" />
           </button>
           <div v-if="menuAbierto" class="role-menu">
-            <div class="role-menu-header"><strong>{{ nombreUsuario }}</strong><small>{{ perfil?.usuarioWindows }}</small></div>
+            <div class="role-menu-header">
+              <strong>{{ nombreUsuario }}</strong><small>{{ perfil?.usuarioWindows }}</small>
+              <small v-if="unidadOrganicaPerfil" class="role-menu-uo"><Icon name="building" :size="12" /> {{ unidadOrganicaPerfil }}</small>
+            </div>
             <div class="role-menu-section">
               <span>Mis roles</span>
               <ul>
@@ -662,49 +983,41 @@ onMounted(() => {
       </div>
     </header>
 
-    <!-- Barra de contexto: Unidad Orgánica del rol activo + acceso directo a cerrar sesión -->
-    <div class="context-bar">
-      <Icon name="building" :size="14" />
-      <span v-if="unidadOrganicaPerfil">Unidad Orgánica: <strong>{{ unidadOrganicaPerfil }}</strong></span>
-      <span v-else class="context-bar-muted">Unidad Orgánica: <strong>No disponible</strong></span>
-      <span class="context-sep"></span>
-      <button class="logout-link" @click="cerrarSesion"><Icon name="log-out" :size="13" /> Cerrar Sesión</button>
-    </div>
-
-    <!-- Sidebar -->
+    <!-- Sidebar (Figma) -->
     <aside class="sidebar" :class="{ collapsed: sidebarColapsado }">
       <nav>
         <template v-if="menuSupervisor">
           <p class="nav-section-label">NAVEGACIÓN PRINCIPAL</p>
-          <button class="nav-button" :class="{ selected: vista === 'mantenimiento' }" @click="irAMantenimientos()" title="Mantenimientos"><Icon name="wrench" :size="17" /> <span>Mantenimientos</span></button>
-          <button class="nav-button" :class="{ selected: vista === 'documentacion' }" @click="irADocumentacion" title="Documentación"><Icon name="file-text" :size="17" /> <span>Documentación</span></button>
-          <button class="nav-button" title="Ayuda"><Icon name="help-circle" :size="17" /> <span>Ayuda</span></button>
+          <button class="nav-button" :class="{ selected: vista === 'mantenimiento' }" @click="irAMantenimientos()" title="Mantenimientos"><Icon name="wrench" :size="18" /> <span>Mantenimientos</span></button>
+          <button class="nav-button" :class="{ selected: vista === 'documentacion' }" @click="irADocumentacion" title="Documentación"><Icon name="file-text" :size="18" /> <span>Documentación</span></button>
+          <button class="nav-button" title="Ayuda"><Icon name="help-circle" :size="18" /> <span>Ayuda</span></button>
         </template>
         <template v-else>
           <p class="nav-section-label">NAVEGACIÓN PRINCIPAL</p>
-          <button class="nav-button" :class="{ selected: vista === 'pendientes' }" @click="irAPendientes" title="Mis pendientes">
-            <Icon name="clock" :size="17" /> <span>Mis pendientes</span>
-            <b v-if="vista === 'pendientes'" class="nav-badge">{{ columns.reduce((a, c) => a + c.total, 0) }}</b>
+          <button class="nav-button" :class="{ selected: vista === 'requerimientos' }" @click="irARequerimientos" title="Requerimientos">
+            <Icon name="folder" :size="18" /> <span>Requerimientos</span>
           </button>
-          <button class="nav-button" :class="{ selected: vista === 'requerimientos' }" @click="irARequerimientos('Tablero')" title="Mis requerimientos">
-            <Icon name="folder" :size="17" /> <span>Mis requerimientos</span>
-            <b v-if="vista === 'requerimientos'" class="nav-badge">{{ columns.reduce((a, c) => a + c.total, 0) }}</b>
+          <button class="nav-button menu-parent" :class="{ open: mantenimientoAbierto, activo: vista === 'mantenimiento' }" @click="mantenimientoAbierto = !mantenimientoAbierto" title="Mantenimiento">
+            <Icon name="wrench" :size="18" /> <span>Mantenimiento</span> <Icon class="chev" name="chevron-down" :size="14" />
           </button>
+          <div v-if="mantenimientoAbierto" class="submenu">
+            <button v-for="opcion in opcionesMantenimientoActivas" :key="opcion.id" :class="{ selected: vista === 'mantenimiento' && mantenimientoActivo === opcion.id }" @click="irAMantenimientos(opcion.id)">{{ opcion.label }}</button>
+          </div>
+          <hr class="nav-divider">
           <p class="nav-section-label">HERRAMIENTAS</p>
-          <button class="nav-button" title="Reportes"><Icon name="bar-chart" :size="17" /> <span>Reportes</span></button>
-          <button class="nav-button" :class="{ selected: vista === 'mantenimiento' }" @click="irAMantenimientos()" title="Incidencias - Mantenimiento"><Icon name="wrench" :size="17" /> <span>Incidencias - Mantenimiento</span></button>
-          <button class="nav-button" title="Ayuda"><Icon name="help-circle" :size="17" /> <span>Ayuda</span></button>
+          <button class="nav-button" title="Reportes"><Icon name="bar-chart" :size="18" /> <span>Reportes</span></button>
+          <button class="nav-button" title="Incidencias"><Icon name="wrench" :size="18" /> <span>Incidencias</span></button>
+          <button class="nav-button" title="Ayuda"><Icon name="help-circle" :size="18" /> <span>Ayuda</span></button>
         </template>
       </nav>
-      <button class="hide-menu" @click="alternarSidebar">
-        <Icon :name="sidebarColapsado ? 'chevrons-right' : 'chevrons-left'" :size="15" />
-        <span v-if="!sidebarColapsado">Ocultar menú</span>
+      <button class="sidebar-logout" @click="cerrarSesion" title="Cerrar sesión">
+        <Icon name="log-out" :size="15" /> <span>Cerrar sesión</span>
       </button>
     </aside>
 
     <!-- Contenido -->
     <section class="dashboard-content">
-      <template v-if="vista === 'requerimientos' || vista === 'pendientes'">
+      <template v-if="vista === 'requerimientos'">
 
         <!-- Registro de Requerimiento: solo arma la imagen del Figma, -->
         <!-- "Registrar" queda deshabilitado porque el backend no tiene ese endpoint todavía. -->
@@ -724,11 +1037,6 @@ onMounted(() => {
 
           <div class="nuevo-req-grid">
             <div class="nuevo-req-col">
-              <div class="detail-card">
-                <h3>Título del Requerimiento *</h3>
-                <p class="form-hint">Describe brevemente el requerimiento en una línea.</p>
-                <input class="form-input-block" v-model="nuevoTitulo" placeholder="Ej: Solicitud de acceso al portal Intrasat...">
-              </div>
 
               <div class="detail-card">
                 <h3>Unidad Orgánica a quien se solicita</h3>
@@ -793,113 +1101,347 @@ onMounted(() => {
           </div>
         </template>
 
-        <!-- Mis requerimientos / Mis pendientes -->
-        <template v-else>
-          <p class="section-eyebrow">{{ (perfilActivo?.nombreRol || 'Usuario').toUpperCase() }} · {{ seccionActivaLabel.toUpperCase() }}</p>
-          <div class="greeting">
-            <h1>Hola, {{ nombreUsuario }} <span>!</span></h1>
-            <p v-if="vista === 'pendientes'">Requerimientos que requieren tu acción{{ perfilActivo ? ` como ${perfilActivo.nombreRol.toLowerCase()}` : '' }}.</p>
-            <p v-else>Gestiona y da seguimiento a los requerimientos que registraste.</p>
-            <p v-if="cargando" class="conn-status">Cargando requerimientos…</p>
-            <p v-else-if="!conectado" class="conn-status conn-status--offline">⚠ No se pudo conectar con el backend (service-requerimiento)<span v-if="mensajeError">: {{ mensajeError }}</span>.<span v-if="vista === 'pendientes'"> Mostrando datos de referencia.</span> <button @click="refrescar">Reintentar</button></p>
-          </div>
-
-          <div class="toolbar">
-            <button class="new-request" @click="abrirNuevoRequerimiento"><Icon name="plus" :size="15" /> Nuevo requerimiento</button>
-            <label class="search"><Icon name="search" :size="16" /><input v-model="numeroBusqueda" placeholder="Buscar por número o título..." @keyup.enter="ejecutarBusquedaAvanzada"></label>
-            <button><Icon name="star" :size="14" /> Alta prioridad</button>
-            <button><Icon name="clock" :size="14" /> Pendientes de conformidad</button>
-            <button><Icon name="shield" :size="14" /> Requiere autorización</button>
-            <button v-if="vista === 'pendientes'" @click="abrirPanelBusqueda">
-              <Icon name="filter" :size="14" /> Búsqueda Avanzada
-              <b v-if="filtrosActivos.length" class="filtro-badge">{{ filtrosActivos.length }}</b>
-            </button>
-            <div class="view-toggle">
-              <button :class="{ selected: vistaTarjetas === 'grid' }" @click="cambiarVistaTarjetas('grid')" aria-label="Vista en tablero"><Icon name="grid" :size="15" /></button>
-              <button :class="{ selected: vistaTarjetas === 'list' }" @click="cambiarVistaTarjetas('list')" aria-label="Vista en lista"><Icon name="list" :size="15" /></button>
-            </div>
-          </div>
-
-          <template v-if="resultadosBusqueda === null">
-            <section class="metrics">
-              <article
-                v-for="metric in metrics"
-                :key="metric[0]"
-                :class="{ selected: metricaSeleccionada === metric[0] }"
-                @click="alternarMetrica(metric[0])"
-              >
-                <i :class="metric[2]"><Icon :name="metric[2] === 'check' ? 'check' : metric[2] === 'close' ? 'x' : metric[2] === 'clock' ? 'clock' : metric[2] === 'user' ? 'user-plus' : metric[2] === 'document' ? 'file-text' : 'folder'" :size="18" /></i>
-                <div><span>{{ metric[0] }}</span><strong>{{ metric[1] }}</strong></div>
-              </article>
-            </section>
-            <p v-if="metricaSeleccionada" class="metrics-filter-hint">Mostrando solo "{{ metricaSeleccionada }}". <button class="volver-pill" @click="alternarMetrica(metricaSeleccionada)"><Icon name="x" :size="12" /> Ver todo</button></p>
-
-            <section class="board" :class="{ 'board--list': vistaTarjetas === 'list' }">
-              <article v-for="column in columnasVisibles" :key="column.title" class="board-column">
-                <header :class="column.tone"><span class="dot"></span><strong>{{ column.title }}</strong><b>{{ column.total }}</b></header>
-                <div class="cards">
-                  <article v-for="card in column.cards" :key="card[0]" class="request-card" @click="seleccionarRequerimiento(card, column)">
-                    <div class="card-top">
-                      <strong>{{ card[0] }}</strong>
-                      <span class="priority-badge" :class="card[4].toLowerCase()">
-                        <Icon v-if="['alta', 'importante'].includes(card[4].toLowerCase())" name="star" :size="10" />
-                        <Icon v-else-if="card[4].toLowerCase() === 'urgente'" name="zap" :size="10" />
-                        {{ card[4] }}
-                      </span>
-                    </div>
-                    <h3>{{ card[1] }}</h3>
-                    <p class="card-area">{{ card[2] }}</p>
-                    <div class="tags"><span>Autorizado</span><span>Conf. pendiente</span></div>
-                    <div class="card-footer">
-                      <span class="card-date"><Icon name="calendar" :size="12" />{{ card[3] }}</span>
-                      <b>ER</b>
-                    </div>
-                  </article>
-                  <p v-if="!column.cards.length" class="empty-column">Sin requerimientos</p>
-                </div>
-              </article>
-            </section>
-          </template>
-
-          <template v-else>
-            <div class="toolbar volver-toolbar">
-              <button class="volver-pill" @click="cerrarBusquedaAvanzada"><Icon name="corner-down-left" :size="14" /> Volver al tablero</button>
-            </div>
-            <div v-if="filtrosActivos.length" class="filtros-chips-row">
-              <span v-if="!buscandoAvanzado && !errorBusquedaAvanzada" class="filtros-chips-count">{{ resultadosBusqueda.length }} resultado{{ resultadosBusqueda.length === 1 ? '' : 's' }}</span>
-              <span v-for="f in filtrosActivos" :key="f.clave" class="filtro-chip">
-                {{ f.etiqueta }}
-                <button type="button" @click="quitarFiltroActivo(f.clave)" aria-label="Quitar filtro"><Icon name="x" :size="10" /></button>
-              </span>
-            </div>
-            <section class="busqueda-resultados">
-              <header><strong>Resultados de búsqueda avanzada</strong><button class="cerrar-busqueda" @click="cerrarBusquedaAvanzada"><Icon name="x" :size="14" /> Cerrar</button></header>
-              <p v-if="buscandoAvanzado" class="conn-status">Buscando…</p>
-              <p v-else-if="errorBusquedaAvanzada" class="conn-status conn-status--offline">⚠ {{ errorBusquedaAvanzada }}</p>
-              <p v-else-if="!resultadosBusqueda.length" class="empty-column">Sin resultados.</p>
-              <div v-else class="cards cards-grid">
-                <article v-for="card in resultadosBusqueda" :key="card[0]" class="request-card" @click="seleccionarRequerimiento(card, { title: 'Búsqueda avanzada' })">
-                  <div class="card-top">
-                    <strong>{{ card[0] }}</strong>
-                    <span class="priority-badge" :class="card[4].toLowerCase()">
-                      <Icon v-if="['alta', 'importante'].includes(card[4].toLowerCase())" name="star" :size="10" />
-                      <Icon v-else-if="card[4].toLowerCase() === 'urgente'" name="zap" :size="10" />
-                      {{ card[4] }}
-                    </span>
-                  </div>
-                  <h3>{{ card[1] }}</h3>
-                  <p class="card-area">{{ card[2] }}</p>
-                  <div class="card-footer"><span class="card-date"><Icon name="calendar" :size="12" />{{ card[3] }}</span></div>
-                </article>
+        <!-- Detalle de requerimiento (vista completa) -->
+        <template v-else-if="vistaDetalle && selectedRequest">
+          <div class="detalle-head">
+            <div>
+              <button class="detail-back" @click="cerrarDetalle"><Icon name="arrow-left" :size="14" /> Volver al tablero</button>
+              <p class="section-eyebrow">DETALLE DE REQUERIMIENTO</p>
+              <div class="detalle-titulo">
+                <h1>{{ selectedRequest.numero }}</h1>
+                <span class="estado-badge" :class="tonoEstado(selectedRequest.codigoEstado)"><i></i>{{ selectedRequest.estado || selectedColumn?.title }}</span>
+                <span class="priority-badge" :class="clasePrioridad(selectedRequest.prioridad)">
+                  <Icon v-if="iconoPrioridad(selectedRequest.prioridad)" :name="iconoPrioridad(selectedRequest.prioridad)" :size="10" />
+                  {{ selectedRequest.prioridad }}
+                </span>
               </div>
-            </section>
-          </template>
+            </div>
+            <div class="detalle-acciones">
+              <button @click="imprimirDetalle"><Icon name="printer" :size="15" /> Imprimir</button>
+              <button disabled title="Pendiente: falta endpoint en service-requerimiento"><Icon name="check" :size="15" /> Iniciar</button>
+              <button :disabled="!puedeAsignar" :title="puedeAsignar ? '' : 'Solo desde Mis pendientes y si no está Atendido/Cerrado'" @click="abrirModalAsignar"><Icon name="user" :size="15" /> Asignar</button>
+              <button disabled title="Pendiente: falta endpoint en service-requerimiento"><Icon name="file-text" :size="15" /> Clasificar</button>
+              <button disabled title="Pendiente: falta endpoint en service-requerimiento"><Icon name="clock" :size="15" /> Evaluar impacto</button>
+              <button class="detalle-accion-borde" disabled title="Pendiente: falta endpoint en service-requerimiento">⚠ Problema/Solución</button>
+              <template v-if="puedeDarConformidad">
+                <button class="conformidad-si"><Icon name="check" :size="15" /> Dar conformidad</button>
+                <button class="conformidad-no"><Icon name="x" :size="15" /> Dar no conformidad</button>
+              </template>
+            </div>
+          </div>
+
+          <p v-if="errorDetalle" class="conn-status conn-status--offline detalle-aviso">⚠ No se pudo cargar parte del detalle (medio de envío, correos, historial, adjuntos): {{ errorDetalle }} <button @click="cargarDetalleCompleto(selectedRequest.codigo)">Reintentar</button></p>
+
+          <div class="detalle-grid">
+            <div class="detalle-col">
+              <section class="detalle-card">
+                <h3>Datos del Requerimiento</h3>
+                <dl class="detalle-datos">
+                  <div><dt>N° Requerimiento</dt><dd>{{ selectedRequest.numero }}</dd></div>
+                  <div><dt>Fecha</dt><dd>{{ selectedRequest.fechaHora }}</dd></div>
+                  <div><dt>Estado actual</dt><dd>{{ selectedRequest.estado || '—' }}</dd></div>
+                  <div><dt>Prioridad</dt><dd>{{ selectedRequest.prioridad.toUpperCase() }}</dd></div>
+                  <div><dt>Categoría</dt><dd>{{ selectedRequest.categoria || '—' }}</dd></div>
+                  <div><dt>Subcategoría</dt><dd>{{ selectedRequest.subcategoria || '—' }}</dd></div>
+                  <div><dt>Clasificación (GIN-PR001)</dt><dd>{{ dato('clasificacion', '—') }}</dd></div>
+                  <div><dt>Medio envío</dt><dd>{{ dato('medioEnvio', '—') }}</dd></div>
+                </dl>
+                <p class="detalle-label">Descripción</p>
+                <div class="detalle-descripcion">{{ descripcionDetalle }}</div>
+              </section>
+
+              <section class="detalle-card detalle-card--tabla">
+                <h3>Correos Copia</h3>
+                <table class="detalle-tabla">
+                  <thead><tr><th>Usuario</th><th>Apellidos y Nombres</th><th>Cargo</th></tr></thead>
+                  <tbody>
+                    <tr v-for="(c, i) in (detalleExtra?.correosCopia || [])" :key="`${c.usuario}-${i}`">
+                      <td class="td-usuario">{{ c.usuario || '—' }}</td><td><strong>{{ c.nombre || '—' }}</strong></td><td>{{ c.cargo || '—' }}</td>
+                    </tr>
+                    <tr v-if="!(detalleExtra?.correosCopia || []).length">
+                      <td colspan="3" class="td-vacio">{{ cargandoDetalle ? 'Cargando…' : 'Sin correos en copia.' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+
+              <section class="detalle-card detalle-card--tabla">
+                <h3>Historial del Requerimiento</h3>
+                <table class="detalle-tabla">
+                  <thead><tr><th>Mov.</th><th>Fecha</th><th>Estado</th><th>Origen</th><th>Destino</th><th>Observación</th></tr></thead>
+                  <tbody>
+                    <tr v-for="h in historialDetalle" :key="h.codigoMovimiento || h.numero">
+                      <td>{{ h.numero }}</td>
+                      <td class="td-fecha-hora">{{ formatearFechaHora(h.fecha) }}</td>
+                      <td><span class="estado-pill azul">{{ h.estado || '—' }}</span></td>
+                      <td class="td-persona">{{ h.personaOrigen || '—' }}<small v-if="h.unidadOrigen">{{ h.unidadOrigen }}</small></td>
+                      <td class="td-persona">{{ h.personaDestino || '—' }}<small v-if="h.unidadDestino">{{ h.unidadDestino }}</small></td>
+                      <td class="td-observacion">{{ h.observacion || '—' }}</td>
+                    </tr>
+                    <tr v-if="!historialDetalle.length">
+                      <td colspan="6" class="td-vacio">{{ cargandoDetalle ? 'Cargando…' : 'Sin movimientos registrados.' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+
+              <section id="detalle-adjuntos" class="detalle-card">
+                <h3>Documentos Adjuntos</h3>
+                <div class="nota-box">
+                  <strong>Nota:</strong>
+                  <ul><li>Tamaño máximo 10 MB por archivo.</li><li>Seleccionar archivo → Adjuntar. Repetir para más archivos.</li></ul>
+                </div>
+                <div class="adjuntar-row">
+                  <button class="modal-btn-secundario"><Icon name="paperclip" :size="14" /> Seleccionar archivo</button>
+                  <span class="form-hint">Ningún archivo seleccionado</span>
+                  <button class="modal-btn-primario" disabled title="Pendiente: falta endpoint">Adjuntar</button>
+                </div>
+                <!-- Archivos ya adjuntos (como el sistema actual). Abrir el archivo queda pendiente del servicio de documentos. -->
+                <div class="adjuntos-lista">
+                  <table class="detalle-tabla">
+                    <thead><tr><th>Arc.</th><th>Fecha carga</th><th>Tipo adjunto</th><th>Descripción</th><th>Usuario</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(d, i) in adjuntosDetalle" :key="`${d.codigoDocumento}-${d.numero ?? i}`">
+                        <td>
+                          <button class="adjunto-abrir" disabled :title="`${d.nombreOriginal || d.nombreArchivo || 'Archivo'} — la descarga estará disponible cuando exista el servicio de documentos`">
+                            <Icon name="folder" :size="16" />
+                          </button>
+                        </td>
+                        <td class="td-fecha-hora">{{ d.fechaCarga || '—' }}</td>
+                        <td>{{ d.tipoAdjunto || '—' }}</td>
+                        <td>{{ d.descripcion || '—' }}<small v-if="d.nombreOriginal" class="adjunto-nombre">{{ d.nombreOriginal }}</small></td>
+                        <td>{{ d.usuario || '—' }}</td>
+                      </tr>
+                      <tr v-if="!adjuntosDetalle.length">
+                        <td colspan="5" class="td-vacio">{{ cargandoDetalle ? 'Cargando…' : 'Sin archivos adjuntos.' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+
+            <div class="detalle-col">
+              <section class="detalle-card">
+                <h3>Datos del Solicitante</h3>
+                <div class="detalle-persona">
+                  <span class="avatar">{{ inicialesSolicitanteDetalle }}</span>
+                  <div><strong>{{ dato('solicitante', selectedRequest.solicitante || '—') }}</strong><small>{{ dato('cargoSolicitante', selectedRequest.cargoSolicitante) }}</small></div>
+                </div>
+                <p class="detalle-label">Unidad orgánica</p>
+                <p class="detalle-valor">{{ dato('unidadOrganicaSolicitante', selectedRequest.area) }}</p>
+              </section>
+
+              <section class="detalle-card">
+                <h3>Datos del Responsable</h3>
+                <p class="detalle-label">Asignado por</p>
+                <p class="detalle-valor">{{ dato('asignadoPor', '—') }}</p>
+                <p class="detalle-label">Responsable</p>
+                <p class="detalle-valor">{{ responsableDetalle }}</p>
+                <p class="detalle-label">Cargo</p>
+                <p class="detalle-valor">{{ dato('cargoResponsable', selectedRequest.cargoResponsable || '—') }}</p>
+                <label class="detalle-check"><input type="checkbox" disabled :checked="!!detalleExtra?.indicadorAvance"> Indicador de Avance</label>
+              </section>
+
+              <section class="detalle-card">
+                <h3>Datos Adicionales</h3>
+                <p class="detalle-label">Ubicación actual</p>
+                <p class="detalle-valor">{{ dato('ubicacionActual', selectedRequest.unidadOrganicaResponsable || '—') }}</p>
+                <p class="detalle-label">Tipo de evaluación</p>
+                <p class="detalle-valor">{{ dato('tipoEvaluacion', '—') }}</p>
+                <p class="detalle-label">Tipo doc. ref.</p>
+                <p class="detalle-valor">{{ dato('tipoDocumentoReferencia', '—') }}</p>
+                <p class="detalle-label">Doc. referencia</p>
+                <p class="detalle-valor">{{ dato('documentoReferencia', '—') }}</p>
+                <p class="detalle-label">Fecha doc. ref.</p>
+                <p class="detalle-valor">{{ dato('fechaDocumentoReferencia', '—') }}</p>
+                <label class="detalle-check"><input type="checkbox" disabled :checked="!!detalleExtra?.documentoFisico"> Doc. Físico</label>
+              </section>
+
+              <section class="detalle-card">
+                <h3>Observación</h3>
+                <textarea v-model="observacionDetalle" class="form-input-block" rows="3" placeholder="Ingrese una observación..."></textarea>
+              </section>
+            </div>
+          </div>
+        </template>
+
+        <!-- Tablero con subpestañas -->
+        <template v-else>
+          <div class="content-top">
+            <p class="section-eyebrow">BIENVENIDA</p>
+            <div class="greeting">
+              <h1>Hola, {{ nombreUsuario }}</h1>
+              <p>Gestiona y da seguimiento a todos los requerimientos del sistema.</p>
+              <p v-if="cargando" class="conn-status">Cargando requerimientos…</p>
+              <p v-else-if="!conectado" class="conn-status conn-status--offline">⚠ No se pudo conectar con el backend (service-requerimiento)<span v-if="mensajeError">: {{ mensajeError }}</span>. <button @click="refrescar">Reintentar</button></p>
+            </div>
+
+            <div class="toolbar">
+              <button class="new-request" @click="abrirNuevoRequerimiento"><Icon name="plus" :size="15" /> Nuevo requerimiento</button>
+              <label class="search" title="Número de requerimiento (Enter para buscar)">
+                <Icon name="search" :size="16" />
+                <input v-model="numeroBusqueda" inputmode="numeric" placeholder="Buscar N° de requerimiento..." @keyup.enter="buscarPorNumero">
+              </label>
+              <button :class="{ activo: soloAltaPrioridad }" @click="soloAltaPrioridad = !soloAltaPrioridad"><Icon name="star" :size="14" /> Alta prioridad</button>
+              <button :class="{ activo: soloConfPendiente }" @click="soloConfPendiente = !soloConfPendiente"><Icon name="clock" :size="14" /> Conf. pendiente</button>
+              <button disabled title="El backend aún no expone si el requerimiento requiere autorización"><Icon name="diamond" :size="14" /> Requiere autorización</button>
+              <button :class="{ activo: filtrosActivos.length }" @click="abrirPanelBusqueda">
+                <Icon name="filter" :size="14" /> Búsqueda Avanzada
+                <b v-if="filtrosActivos.length" class="filtro-badge">{{ filtrosActivos.length }}</b>
+              </button>
+              <div class="view-toggle">
+                <button :class="{ selected: vistaTarjetas === 'grid' }" @click="cambiarVistaTarjetas('grid')" aria-label="Vista en tablero"><Icon name="grid" :size="15" /></button>
+                <button :class="{ selected: vistaTarjetas === 'list' }" @click="cambiarVistaTarjetas('list')" aria-label="Vista en lista"><Icon name="list" :size="15" /></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Resultado de la búsqueda: total + chips de filtros aplicados -->
+          <div v-if="filtrosAplicados" class="filtros-chips-row">
+            <span v-if="buscandoAvanzado" class="filtros-chips-count">Buscando…</span>
+            <span v-else-if="errorBusquedaAvanzada" class="filtros-chips-count conn-status--offline">⚠ {{ errorBusquedaAvanzada }}</span>
+            <span v-else class="filtros-chips-count">{{ totalResultados }} resultado{{ totalResultados === 1 ? '' : 's' }}</span>
+            <span v-for="f in filtrosActivos" :key="f.clave" class="filtro-chip">
+              {{ f.etiqueta }}
+              <button type="button" @click="quitarFiltroActivo(f.clave)" aria-label="Quitar filtro"><Icon name="x" :size="10" /></button>
+            </span>
+            <button type="button" class="limpiar-chips" @click="limpiarFiltrosAvanzados">Limpiar</button>
+          </div>
+
+          <!-- Subpestañas -->
+          <nav class="subtabs">
+            <button
+              v-for="t in PESTANAS"
+              :key="t.id"
+              :class="{ activo: pestana === t.id }"
+              @click="cambiarPestana(t.id)"
+            >
+              {{ t.label }}
+              <b v-if="t.id !== 'otros' || filtrosAplicados" class="subtab-count">{{ conteos[t.id] }}</b>
+            </button>
+          </nav>
+
+          <div class="tab-body">
+            <!-- Otros requerimientos: solo muestra lo que encuentra la búsqueda -->
+            <div v-if="pestana === 'otros' && !filtrosAplicados" class="empty-state">
+              <Icon name="search" :size="40" />
+              <strong>Busca un requerimiento</strong>
+              <p>Ingresa el N° de requerimiento o usa la Búsqueda Avanzada para encontrar cualquier registro del sistema.</p>
+            </div>
+
+            <template v-else>
+              <section class="metrics">
+                <article
+                  v-for="metric in tablero.metrics"
+                  :key="metric.title"
+                  :class="[metric.tone, { selected: metricaSeleccionada === metric.title }]"
+                  @click="alternarMetrica(metric.title)"
+                >
+                  <i><Icon :name="metric.icon" :size="20" /></i>
+                  <div><span>{{ metric.title }}</span><strong>{{ metric.total }}</strong></div>
+                </article>
+              </section>
+              <p v-if="metricaSeleccionada" class="metrics-filter-hint">Mostrando solo "{{ metricaSeleccionada }}". <button class="volver-pill" @click="alternarMetrica(metricaSeleccionada)"><Icon name="x" :size="12" /> Ver todo</button></p>
+
+              <!-- Vista tablero: columnas con 10 tarjetas por página -->
+              <section v-if="vistaTarjetas === 'grid'" class="board">
+                <article v-for="column in columnasVisibles" :key="column.title" class="board-column">
+                  <header :class="column.tone"><span class="dot"></span><strong>{{ column.title }}</strong><b>{{ column.total }}</b></header>
+                  <div class="cards">
+                    <article
+                      v-for="card in tarjetasPagina(column)"
+                      :key="card.codigo"
+                      class="request-card"
+                      @click="abrirDetalle(card, column)"
+                    >
+                      <div class="card-body">
+                        <div class="card-top">
+                          <span class="card-numero">{{ card.numero }}</span>
+                          <span class="priority-badge" :class="clasePrioridad(card.prioridad)">
+                            <Icon v-if="iconoPrioridad(card.prioridad)" :name="iconoPrioridad(card.prioridad)" :size="10" />
+                            {{ card.prioridad }}
+                          </span>
+                        </div>
+                        <p class="card-area">{{ card.area }}</p>
+                        <p v-if="card.categoria" class="card-categoria">{{ card.categoria }}<template v-if="card.subcategoria"> · {{ card.subcategoria }}</template></p>
+                        <div class="tags"><span v-for="e in etiquetasTarjeta(card)" :key="e.texto" :class="e.tono">{{ e.texto }}</span></div>
+                        <div class="card-footer">
+                          <span class="card-date"><Icon name="calendar" :size="12" />{{ card.fecha }}</span>
+                          <b v-if="card.inicialesResponsable" :title="card.responsable">{{ card.inicialesResponsable }}</b>
+                        </div>
+                      </div>
+                      <button
+                        v-if="accionTarjeta(card, column.title)"
+                        class="card-action"
+                        :class="accionTarjeta(card, column.title)"
+                        @click.stop="ejecutarAccionTarjeta(card, column.title)"
+                      >
+                        <template v-if="accionTarjeta(card, column.title) === 'conformidad'"><Icon name="check" :size="14" /> Dar conformidad</template>
+                        <template v-else><Icon name="user" :size="14" /> Asignar</template>
+                      </button>
+                    </article>
+                    <p v-if="!column.cards.length" class="empty-column">Sin requerimientos</p>
+                    <Paginador
+                      v-if="column.total > TAM_PAGINA_TABLERO"
+                      :pagina="paginaColumna(column)"
+                      :total="column.total"
+                      :tamano="TAM_PAGINA_TABLERO"
+                      @cambiar="(n) => cambiarPaginaColumna(column, n)"
+                    />
+                  </div>
+                </article>
+              </section>
+
+              <!-- Vista lista: tabla del Figma con 15 filas por página -->
+              <section v-else class="tabla-card">
+                <div class="tabla-scroll">
+                  <table class="req-tabla">
+                    <thead>
+                      <tr><th>N° Req.</th><th>Categoría</th><th>Unidad</th><th>Grupo</th><th>Estado</th><th>Prioridad</th><th>Fecha</th><th>Acción</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="fila in filasPagina" :key="fila.codigo" @click="abrirDetalle(fila)">
+                        <td class="td-numero">{{ fila.numero }}</td>
+                        <td class="td-categoria"><strong>{{ fila.categoria || 'Sin clasificar' }}</strong><small v-if="fila.subcategoria">{{ fila.subcategoria }}</small></td>
+                        <td class="td-unidad" :title="fila.area">{{ fila.area }}</td>
+                        <td><span class="grupo-pill" :class="fila.tonoGrupo">{{ fila.grupo }}</span></td>
+                        <td><span class="estado-pill" :class="pestana === 'noClasificados' ? 'gris' : tonoEstado(fila.codigoEstado)">{{ pestana === 'noClasificados' ? 'Por clasificar' : (fila.estado || '-') }}</span></td>
+                        <td>
+                          <span class="priority-badge" :class="clasePrioridad(fila.prioridad)">
+                            <Icon v-if="iconoPrioridad(fila.prioridad)" :name="iconoPrioridad(fila.prioridad)" :size="10" />
+                            {{ fila.prioridad }}
+                          </span>
+                        </td>
+                        <td class="td-fecha">{{ fila.fecha }}</td>
+                        <td>
+                          <button v-if="accionFila(fila)" class="tabla-accion" :class="accionFila(fila)" @click.stop="ejecutarAccionTarjeta(fila)">
+                            <template v-if="accionFila(fila) === 'conformidad'"><Icon name="check" :size="13" /> Dar conformidad</template>
+                            <template v-else-if="accionFila(fila) === 'asignar'"><Icon name="user" :size="13" /> Asignar</template>
+                            <template v-else><Icon name="file-text" :size="13" /> Adjuntar archivo</template>
+                          </button>
+                        </td>
+                      </tr>
+                      <tr v-if="!filasVisibles.length"><td colspan="8" class="td-vacio">Sin requerimientos</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <Paginador
+                  v-if="filasVisibles.length"
+                  :pagina="paginaListaActual"
+                  :total="filasVisibles.length"
+                  :tamano="TAM_PAGINA_LISTA"
+                  @cambiar="(n) => (paginaLista = n)"
+                />
+              </section>
+            </template>
+          </div>
         </template>
       </template>
 
       <template v-else-if="vista === 'mantenimiento'">
         <p class="section-eyebrow">{{ (perfilActivo?.nombreRol || 'Usuario').toUpperCase() }} · MANTENIMIENTOS</p>
-        <div class="greeting"><h1>Mantenimientos <span>!</span></h1><p>Catálogos maestros del sistema (Personas, Categorías, Problemas, Soluciones y sus relaciones).</p></div>
+        <div class="greeting"><h1>Mantenimientos</h1><p>Catálogos maestros del sistema (Personas, Categorías, Problemas, Soluciones y sus relaciones).</p></div>
         <div class="toolbar mantenimiento-toolbar">
           <button v-for="opcion in opcionesMantenimientoActivas" :key="opcion.id" :class="{ selected: mantenimientoActivo === opcion.id }" @click="irAMantenimientos(opcion.id)">{{ opcion.label }}</button>
         </div>
@@ -921,54 +1463,14 @@ onMounted(() => {
 
       <template v-else-if="vista === 'documentacion'">
         <p class="section-eyebrow">{{ (perfilActivo?.nombreRol || 'Usuario').toUpperCase() }} · DOCUMENTACIÓN</p>
-        <div class="greeting"><h1>Documentación <span>!</span></h1><p>Procedimientos y manuales del Sistema de Gestión de Requerimientos.</p></div>
+        <div class="greeting"><h1>Documentación</h1><p>Procedimientos y manuales del Sistema de Gestión de Requerimientos.</p></div>
         <section class="mantenimiento-panel">
           <p class="empty-column">Aquí irán los documentos de referencia (Procedimiento del SGR, Manual de usuario). </p>
         </section>
       </template>
     </section>
 
-    <!-- Panel de detalle -->
-    <aside v-if="selectedRequest" class="detail-panel">
-      <div class="detail-panel-head">
-        <div>
-          <button class="detail-back" @click="cerrarDetalle"><Icon name="arrow-left" :size="14" /> Volver al tablero</button>
-          <div class="detail-title-row">
-            <b>{{ selectedRequest[0] }}</b>
-            <span class="status-pill" :style="{ color: 'var(--blue)', background: '#eaf0ff' }">{{ selectedColumn?.title }}</span>
-            <span class="priority-badge" :class="selectedRequest[4].toLowerCase()">{{ selectedRequest[4] }}</span>
-          </div>
-          <h2 class="detail-subtitle">{{ selectedRequest[1] }}</h2>
-        </div>
-        <button class="close-detail" aria-label="Cerrar detalle" @click="cerrarDetalle"><Icon name="x" :size="18" /></button>
-      </div>
-
-      <div class="detail-actions">
-        <button class="move"><Icon name="move" :size="14" /> Mover de estado</button>
-        <button v-if="puedeAsignar" class="asignar" @click="abrirModalAsignar"><Icon name="user-plus" :size="14" /> Asignar</button>
-        <button><Icon name="shield" :size="14" /> Solicitar autorización</button>
-        <template v-if="puedeDarConformidad">
-          <button class="conformidad-si"><Icon name="check" :size="14" /> Dar conformidad</button>
-          <button class="conformidad-no"><Icon name="x" :size="14" /> Dar no conformidad</button>
-        </template>
-        <button><Icon name="history" :size="14" /> Ver historial</button>
-      </div>
-
-      <div class="detail-body">
-        <div class="detail-card">
-          <h3>Datos del Requerimiento</h3>
-          <dl class="detail-grid">
-            <div><dt>N° Requerimiento</dt><dd>{{ selectedRequest[0] }}</dd></div>
-            <div><dt>Fecha</dt><dd>{{ selectedRequest[3] }}</dd></div>
-            <div><dt>Estado actual</dt><dd class="orange">{{ selectedColumn?.title }}</dd></div>
-            <div><dt>Prioridad</dt><dd>{{ selectedRequest[4] }}</dd></div>
-            <div style="grid-column:1/-1"><dt>Área solicitante</dt><dd>{{ selectedRequest[2] }}</dd></div>
-          </dl>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Panel "Búsqueda Avanzada" (Cambio 19) -->
+    <!-- Panel "Búsqueda Avanzada" (Figma). La fecha viene por defecto con el día de hoy. -->
     <div v-if="mostrarPanelBusqueda" class="modal-overlay" @click.self="cerrarPanelBusqueda">
       <aside class="filtros-panel">
         <div class="filtros-panel-head">
@@ -978,17 +1480,18 @@ onMounted(() => {
         <div class="filtros-panel-body">
           <div class="form-field"><label>SOLICITANTE</label><input v-model="solicitanteFiltro" placeholder="Buscar usuario..."></div>
           <div class="form-field"><label>RESPONSABLE</label><input v-model="responsableFiltro" placeholder="Buscar usuario..."></div>
-          <div class="form-field"><label>ROL</label><select v-model="rolFiltro"><option value="">— Todos —</option><option value="Administrador">Administrador</option><option value="Operador">Operador</option><option value="Supervisor">Supervisor</option><option value="Responsable">Responsable</option></select></div>
-          <div class="form-field"><label>PRIORIDAD</label><select v-model="prioridadFiltro"><option value="">— Todos —</option><option value="Alta">Alta</option><option value="Media">Media</option><option value="Baja">Baja</option></select></div>
+          <div class="form-field"><label>N° DE REQUERIMIENTO</label><input v-model="numeroBusqueda" inputmode="numeric" placeholder="Ej: 287273"></div>
+          <div class="form-field"><label>ROL</label><select v-model="rolFiltro" disabled title="Pendiente: el backend no devuelve el rol"><option value="">— Todos —</option></select></div>
+          <div class="form-field"><label>PRIORIDAD</label><select v-model="prioridadFiltro"><option value="">— Todos —</option><option v-for="p in opcionesPrioridad" :key="p" :value="p">{{ p }}</option></select></div>
           <div class="form-field"><label>ESTADO</label><select v-model="estadoFiltro"><option value="">— Todos —</option><option v-for="op in OPCIONES_ESTADO_BUSQUEDA" :key="op.value" :value="op.value">{{ op.label }}</option></select></div>
-          <div class="form-field"><label>SUBESTADO</label><select v-model="subestadoFiltro"><option value="">— Todos —</option></select></div>
-          <div class="form-field"><label>CATEGORÍA</label><select v-model="categoriaFiltro"><option value="">— Todos —</option></select></div>
-          <div class="form-field"><label>SUBCATEGORÍA</label><select v-model="subcategoriaFiltro"><option value="">— Todos —</option></select></div>
+          <div class="form-field"><label>SUBESTADO</label><select v-model="subestadoFiltro" disabled title="Pendiente: el backend no devuelve el subestado"><option value="">— Todos —</option></select></div>
+          <div class="form-field"><label>CATEGORÍA</label><select v-model="categoriaFiltro"><option value="">— Todos —</option><option v-for="c in categorias" :key="c.codigoCategoria" :value="c.codigoCategoria">{{ c.nombreCategoria }}</option></select></div>
+          <div class="form-field"><label>SUBCATEGORÍA</label><select v-model="subcategoriaFiltro" :disabled="!categoriaFiltro"><option value="">— Todos —</option><option v-for="s in subcategorias" :key="s.codigoSubcategoria" :value="s.codigoSubcategoria">{{ s.nombreSubcategoria }}</option></select></div>
           <div class="modal-grid-2">
             <div class="form-field"><label>FECHA DESDE</label><input type="date" v-model="fechaInicioBusqueda"></div>
             <div class="form-field"><label>FECHA HASTA</label><input type="date" v-model="fechaFinBusqueda"></div>
           </div>
-          <p class="form-hint">Pendiente de culminar la implementación</p>
+          <p class="form-hint">Por defecto busca lo registrado hoy. Si ingresas un N° de requerimiento, se busca en cualquier fecha. Rol y Subestado quedan pendientes (el backend no devuelve esos datos).</p>
         </div>
         <div class="filtros-panel-actions">
           <button class="modal-btn-secundario" @click="limpiarFiltrosAvanzados">Limpiar todo</button>
@@ -1006,11 +1509,11 @@ onMounted(() => {
         <div class="modal-grid-2">
           <div class="form-field">
             <label>Requerimiento Nº</label>
-            <input :value="selectedRequest?.[0]" disabled>
+            <input :value="selectedRequest?.numero" disabled>
           </div>
           <div class="form-field">
             <label>Estado</label>
-            <input :value="selectedColumn?.title" disabled>
+            <input :value="selectedRequest?.estado || selectedColumn?.title" disabled>
           </div>
         </div>
 

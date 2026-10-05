@@ -47,6 +47,12 @@ defineProps({
     <template v-else-if="name === 'inbox'"><path d="M4 12h4l2 3h4l2-3h4" /><path d="M5.4 5h13.2L21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6Z" /></template>
     <template v-else-if="name === 'zap'"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" /></template>
     <template v-else-if="name === 'upload'"><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></template>
+    <template v-else-if="name === 'menu'"><path d="M4 6h16M4 12h16M4 18h16" /></template>
+    <template v-else-if="name === 'cpu'"><rect x="6" y="6" width="12" height="12" rx="2" /><rect x="9.5" y="9.5" width="5" height="5" /><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4" /></template>
+    <template v-else-if="name === 'check-circle'"><circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.5 2.5 4.5-5" /></template>
+    <template v-else-if="name === 'send'"><path d="M21 3 10 14M21 3l-7 18-4-7-7-4Z" /></template>
+    <template v-else-if="name === 'user'"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" /></template>
+    <template v-else-if="name === 'diamond'"><path d="M12 4 20 12 12 20 4 12Z" /></template>
     <template v-else-if="name === 'chevrons-left'"><path d="m11 17-5-5 5-5M18 17l-5-5 5-5" /></template>
     <template v-else-if="name === 'chevrons-right'"><path d="m13 17 5-5-5-5M6 17l5-5-5-5" /></template>
   </svg>

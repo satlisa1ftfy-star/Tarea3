@@ -76,5 +76,5 @@ export function createHttpClient(baseUrl) {
   }
 }
 
-// Cliente para requerimiento (requerimientos, personas, categorías, etc.)
+// Cliente para requerimiento (requerimientos, categorías, estados, etc.)
 export const http = createHttpClient(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080')
