@@ -6,6 +6,7 @@ import { listarPersonas } from '../services/personaService'
 import { buscarUnidadOrganica } from '../services/unidadOrganicaService'
 import { asignarRequerimiento } from '../services/requerimientoService'
 import Icon from '../components/Icon.vue'
+import SolicitarAutorizacionModal from '../components/requerimiento/SolicitarAutorizacionModal.vue'
 
 const props = defineProps({
   perfil: { type: Object, default: null },
@@ -259,6 +260,7 @@ function irAPendientes() {
 function seleccionarRequerimiento(card, column) {
   selectedRequest.value = card
   selectedColumn.value = column
+  mensajeAutorizacion.value = ''
 }
 
 function cerrarDetalle() {
@@ -508,6 +510,27 @@ async function confirmarAsignacion() {
   } finally {
     asignando.value = false
   }
+}
+
+// -------------------------------------------------------------------------
+// Solicitar autorización: la lógica del modal vive en
+// components/requerimiento/SolicitarAutorizacionModal.vue. Aquí solo se
+// controla si está abierto y el mensaje que se muestra en el panel de detalle.
+const mostrarModalAutorizacion = ref(false)
+const mensajeAutorizacion = ref('')
+
+function abrirModalAutorizacion() {
+  mensajeAutorizacion.value = ''
+  mostrarModalAutorizacion.value = true
+}
+
+function cerrarModalAutorizacion() {
+  mostrarModalAutorizacion.value = false
+}
+
+function alPrepararSolicitudAutorizacion(payload) {
+  mostrarModalAutorizacion.value = false
+  mensajeAutorizacion.value = `Solicitud de autorización preparada para ${payload.codigosPersonaAutoriza.length} persona(s).`
 }
 
 // Carga según rol activo: Administrador usa búsqueda manual; Operador autocarga
@@ -946,7 +969,7 @@ onMounted(() => {
       <div class="detail-actions">
         <button class="move"><Icon name="move" :size="14" /> Mover de estado</button>
         <button v-if="puedeAsignar" class="asignar" @click="abrirModalAsignar"><Icon name="user-plus" :size="14" /> Asignar</button>
-        <button><Icon name="shield" :size="14" /> Solicitar autorización</button>
+        <button @click="abrirModalAutorizacion"><Icon name="shield" :size="14" /> Solicitar autorización</button>
         <template v-if="puedeDarConformidad">
           <button class="conformidad-si"><Icon name="check" :size="14" /> Dar conformidad</button>
           <button class="conformidad-no"><Icon name="x" :size="14" /> Dar no conformidad</button>
@@ -955,6 +978,7 @@ onMounted(() => {
       </div>
 
       <div class="detail-body">
+        <p v-if="mensajeAutorizacion" class="conn-status">✓ {{ mensajeAutorizacion }}</p>
         <div class="detail-card">
           <h3>Datos del Requerimiento</h3>
           <dl class="detail-grid">
@@ -1116,6 +1140,18 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- Modal Solicitar autorización -->
+    <SolicitarAutorizacionModal
+      :visible="mostrarModalAutorizacion"
+      :perfil="perfil"
+      :requerimiento="selectedRequest"
+      :estado="selectedColumn?.title"
+      :codigo-requerimiento="codigoRequerimientoSeleccionado()"
+      :unidad-organica="unidadOrganicaPropia"
+      @cerrar="cerrarModalAutorizacion"
+      @solicitud-preparada="alPrepararSolicitudAutorizacion"
+    />
 
     <!-- Modal de confirmación. -->
     <div v-if="mostrarConfirmacionAsignar" class="modal-overlay">

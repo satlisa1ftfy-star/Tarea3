@@ -151,6 +151,8 @@ export async function cargarPendientes(perfil = null) {
   }
 
   try {
+      console.log( " codigoPersonaGr " + codigoPersonaGr );
+
     const [comoResponsable, porConformidad] = await Promise.all([
       buscarRequerimientos({ codigoPersonaResponsable: codigoPersonaGr, vigencia: 1 }),
       buscarRequerimientos({ codigoPersonaSolicitante: codigoPersonaGr, codigoEstado: ESTADO.ATENDIDO, vigencia: 1 }),

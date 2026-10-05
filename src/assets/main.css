@@ -349,3 +349,9 @@ textarea.form-input-block{resize:vertical;min-height:100px}
   .dashboard-content { padding: 16px 12px; }
   .toolbar { margin-right: -12px; padding-right: 12px; }
 }
+.autorizadores-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;font-size:12px}
+.autorizadores-lista{max-height:180px;margin:6px 0 0;padding:4px;overflow-y:auto;list-style:none;border:1px solid var(--border);border-radius:10px;background:#fff}
+.autorizadores-lista label{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;color:var(--text);font-size:12px;font-weight:500;text-transform:none;cursor:pointer}
+.autorizadores-lista label:hover{background:#eef3ff}
+.autorizadores-lista input{width:auto;margin:0}
+.autorizadores-lista small{color:var(--muted,#7a8699)}
