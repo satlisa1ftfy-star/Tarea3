@@ -1,8 +1,8 @@
-import { http } from './http'
+import { orgHttp } from './orgHttp'
 
 /**
  * Busca unidades orgánicas por nombre (o parte del nombre).
  */
 export function buscarUnidadOrganica(nombre) {
-  return http.get(`/api/requerimiento/buscarUnidadOrganica/${encodeURIComponent(nombre)}`)
+  return orgHttp.get(`/api/organizacion/buscarUnidadOrganica/${encodeURIComponent(nombre)}`)
 }

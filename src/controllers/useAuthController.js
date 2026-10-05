@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { login as loginApi } from '../services/seguridadService'
 import { authHttp } from '../services/authHttp'
 import { http } from '../services/http'
+import { orgHttp } from '../services/orgHttp'
 
 export function useAuthController() {
   const username = ref('')
@@ -36,6 +37,7 @@ export function useAuthController() {
   function logout() {
     authHttp.clearAuthToken()
     http.clearAuthToken()
+    orgHttp.clearAuthToken()
     isAuthenticated.value = false
     perfil.value = null
     submitted.value = false

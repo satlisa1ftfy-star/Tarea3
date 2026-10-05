@@ -1,6 +1,6 @@
 import { buscarRequerimientos } from '../services/requerimientoService'
 
-// (bloques "Conteo de requerimientos" / "Mis Requerimientos" del legado).
+// Catálogo GRTabEstado (bloques "Conteo de requerimientos" / "Mis Requerimientos" del legado).
 export const ESTADO = {
   REGISTRADO: 1,
   POR_ASIGNAR: 2,
@@ -16,8 +16,7 @@ export const ESTADO = {
   CERRADO_POR_REVERSION: 14,
 }
 
-// Todo lo "Cerrado" se agrupa en una sola columna; No conforme (9) va aparte.
-const ESTADOS_CERRADO = [
+export const ESTADOS_CERRADO = [
   ESTADO.CERRADO_CONFORME,
   ESTADO.CERRADO_RECHAZADO,
   ESTADO.CERRADO_ANULADO,
@@ -26,162 +25,218 @@ const ESTADOS_CERRADO = [
   ESTADO.CERRADO_POR_REVERSION,
 ]
 
-// Columnas fijas de "Mis requerimientos" (registrado por el usuario conectado).
-const COLUMNAS_MIS_REQUERIMIENTOS = [
-  { title: 'Registrados', tone: 'yellow', estados: [ESTADO.REGISTRADO] },
-  { title: 'Por asignar', tone: 'amber', estados: [ESTADO.POR_ASIGNAR] },
-  { title: 'Asignados', tone: 'purple', estados: [ESTADO.ASIGNADO] },
-  { title: 'En proceso', tone: 'blue', estados: [ESTADO.EN_PROCESO] },
-  { title: 'Atendido', tone: 'green', estados: [ESTADO.ATENDIDO] },
-  { title: 'Cerrado', tone: 'slate', estados: ESTADOS_CERRADO },
-  { title: 'No conforme', tone: 'rose', estados: [ESTADO.NO_CONFORME] },
+// Subpestañas del tablero.
+export const PESTANAS = [
+  { id: 'otros', label: 'Otros requerimientos' },
+  { id: 'noClasificados', label: 'No clasificados' },
+  { id: 'pendientes', label: 'Mis pendientes' },
+  { id: 'mis', label: 'Mis requerimientos' },
 ]
 
-// Datos de referencia (mock) para "Mis pendientes".
-export const mockMetricsPendientes = [
-  ['Por asignar', '4', 'briefcase'], ['Por atender', '9', 'clock'], ['Por autorizar', '2', 'document'], ['Por dar conformidad', '3', 'check'], ['No conforme', '1', 'close'],
-]
-
-export const mockColumnsPendientes = [
-  { title: 'Por asignar', tone: 'amber', total: 4, cards: [] },
-  { title: 'Por atender', tone: 'blue', total: 9, cards: [] },
-  { title: 'Por autorizar', tone: 'slate', total: 2, cards: [] },
-  { title: 'Por dar conformidad', tone: 'purple', total: 3, cards: [] },
-  { title: 'No conforme', tone: 'rose', total: 1, cards: [] },
-]
-
-/**
- * Búsqueda avanzada de requerimientos 
- * Administrador y Operador
- */
-export async function buscarAvanzado({
-  codigoUoResponsable = 0,
-  numero = 0,
-  codigoEstado = 0,
-  fechaInicio = 'TODO',
-  fechaFin = 'TODO',
-} = {}) {
-  try {
-    const requerimientos = await buscarRequerimientos({
-      codigoUoResponsable,
-      numero,
-      codigoEstado,
-      fechaInicio,
-      fechaFin,
-      vigencia: 1,
-    })
-    return { cards: requerimientos.map(aTarjeta), online: true }
-  } catch (error) {
-    console.error('No se pudo ejecutar la búsqueda avanzada.', error)
-    return { cards: [], online: false, errorMessage: error?.message || 'Error desconocido' }
-  }
+// Columnas por subpestaña. soloSiHay: se oculta cuando está vacía.
+const COLUMNAS = {
+  mis: [
+    { title: 'Pendientes', tone: 'yellow', icon: 'cpu', estados: [ESTADO.REGISTRADO, ESTADO.POR_ASIGNAR, ESTADO.ASIGNADO, ESTADO.EN_PROCESO, ESTADO.NO_CONFORME] },
+    { title: 'Atendidos', tone: 'green', icon: 'check-circle', estados: [ESTADO.ATENDIDO] },
+    { title: 'Cerrados', tone: 'slate', icon: 'check', estados: ESTADOS_CERRADO, soloSiHay: true },
+  ],
+  pendientes: [
+    { title: 'Por asignar', tone: 'amber', icon: 'send', estados: [ESTADO.REGISTRADO, ESTADO.POR_ASIGNAR] },
+    { title: 'Asignados', tone: 'orange', icon: 'user', estados: [ESTADO.ASIGNADO] },
+    { title: 'En proceso', tone: 'blue', icon: 'cpu', estados: [ESTADO.EN_PROCESO] },
+    { title: 'No conforme', tone: 'rose', icon: 'x', estados: [ESTADO.NO_CONFORME], soloSiHay: true },
+    { title: 'Atendidos', tone: 'green', icon: 'check-circle', estados: [ESTADO.ATENDIDO], soloSiHay: true },
+    // Sin "Cerrados": lo cerrado ya no es un pendiente (ver sinCerrados).
+  ],
+  noClasificados: [
+    { title: 'Por clasificar', tone: 'purple', icon: 'file-text', estados: null },
+  ],
+  otros: [
+    { title: 'Encontrados', tone: 'blue', icon: 'search', estados: null },
+  ],
 }
 
 function formatearFecha(fechaISO) {
   if (!fechaISO) return '-'
   const fecha = new Date(fechaISO)
   if (Number.isNaN(fecha.getTime())) return String(fechaISO).slice(0, 10)
-  return fecha.toLocaleDateString('es-PE')
+  return fecha.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-function aTarjeta(req) {
-  return [
-    `REQ-${req.codigoRequerimiento}`,
-    req.titulo || '(sin título)',
-    req.unidadOrganicaSolicitante || req.unidadOrganicaRequerimiento || '-',
-    formatearFecha(req.fechaRegistro),
-    req.prioridad || 'Media',
+// dd/mm/aaaa hh:mm:ss (detalle del requerimiento).
+export function formatearFechaHora(fechaISO) {
+  if (!fechaISO) return '-'
+  const fecha = new Date(fechaISO)
+  if (Number.isNaN(fecha.getTime())) return String(fechaISO)
+  const hora = fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  return `${formatearFecha(fechaISO)} ${hora}`
+}
+
+// La descripción del legado viene en HTML (copiado de Word/Outlook): se muestra como texto limpio,
+// como en el sistema antiguo. Se usa DOMParser (no v-html) para no ejecutar nada del contenido.
+export function htmlATexto(html) {
+  const fuente = String(html || '')
+  if (!fuente.trim()) return ''
+  if (typeof DOMParser === 'undefined' || !/[<&]/.test(fuente)) return fuente.trim()
+  const doc = new DOMParser().parseFromString(fuente, 'text/html')
+  doc.querySelectorAll('br').forEach((br) => br.replaceWith('\n'))
+  doc.querySelectorAll('li').forEach((li) => li.prepend('• '))
+  doc.querySelectorAll('p, div, li, tr, h1, h2, h3, h4, h5, h6').forEach((el) => el.append('\n'))
+  return (doc.body.textContent || '')
+    .replace(/\u00a0/g, ' ')          // &nbsp;
+    .replace(/[ \t]+/g, ' ')          // espacios repetidos de Word
+    .split('\n').map((l) => l.trim()).join('\n')
+    .replace(/\n{3,}/g, '\n\n')       // como máximo una línea en blanco
+    .trim()
+}
+
+// Mis pendientes no incluye requerimientos cerrados.
+export function sinCerrados(requerimientos = []) {
+  return requerimientos.filter((r) => !ESTADOS_CERRADO.includes(r.codigoEstado))
+}
+
+function iniciales(nombre) {
+  const p = String(nombre || '').trim().split(/\s+/).filter(Boolean)
+  if (!p.length) return ''
+  return ((p[0][0] || '') + (p[1]?.[0] || '')).toUpperCase()
+}
+
+// Tarjeta del tablero a partir de una fila de /api/requerimiento/buscar.
+export function aTarjeta(req) {
+  const texto = (v) => String(v || '').trim()
+  return {
+    codigo: req.codigoRequerimiento,
+    numero: String(req.codigoRequerimiento), 
+    area: texto(req.unidadOrganicaSolicitante) || texto(req.unidadOrganicaRequerimiento) || '-',
+    categoria: texto(req.categoria),
+    subcategoria: texto(req.subcategoria),
+    descripcion: htmlATexto(req.descripcion),
+    fecha: formatearFecha(req.fechaRegistro),
+    fechaHora: formatearFechaHora(req.fechaRegistro),
+    prioridad: texto(req.prioridad) || 'Normal',
+    codigoEstado: req.codigoEstado,
+    estado: texto(req.estado),
+    solicitante: texto(req.solicitante),
+    cargoSolicitante: texto(req.cargoSolicitante),
+    inicialesSolicitante: iniciales(req.solicitante),
+    responsable: texto(req.responsable),
+    cargoResponsable: texto(req.cargoResponsable),
+    unidadOrganicaResponsable: texto(req.unidadOrganicaResponsable),
+    inicialesResponsable: iniciales(req.responsable),
+    raw: req,
+  }
+}
+
+// Métricas + columnas de una subpestaña a partir de su lista de requerimientos.
+export function construirTablero(pestana, requerimientos = []) {
+  const columns = (COLUMNAS[pestana] || [])
+    .map((col) => {
+      const reqs = col.estados ? requerimientos.filter((r) => col.estados.includes(r.codigoEstado)) : requerimientos
+      return { title: col.title, tone: col.tone, icon: col.icon, soloSiHay: !!col.soloSiHay, total: reqs.length, cards: reqs.map(aTarjeta) }
+    })
+    .filter((c) => !c.soloSiHay || c.total > 0)
+
+  const metrics = columns.map((c) => ({ title: c.title, total: c.total, tone: c.tone, icon: c.icon }))
+  // Vista lista (tabla del Figma): todas las filas con su grupo (columna).
+  const filas = columns.flatMap((c) => c.cards.map((card) => ({ ...card, grupo: c.title, tonoGrupo: c.tone })))
+  return { metrics, columns, filas }
+}
+
+/**
+ * No clasificados: Registrados vigentes cuya ubicación actual es la unidad del rol activo
+ * (última transferencia o UO de registro). Aunque aún no tengan movimientos ni responsable.
+ * Sin UO conocida no se consulta: sin acotar recorre toda la tabla (timeout 15s).
+ */
+export function cargarNoClasificados(codigoUoActiva = 0) {
+  if (!codigoUoActiva) return Promise.resolve([])
+  return buscarRequerimientos({ codigoEstado: ESTADO.REGISTRADO, codigoUoRequerimiento: codigoUoActiva, vigencia: 1 })
+    // Solo los de MI unidad (destino/ubicación actual): no se clasifica ni asigna lo de otras unidades.
+    // Respaldo por si el backend aún no aplica el filtro (devolvería todas las unidades).
+    .then((lista) => (lista || []).filter((r) => Number(r.codigoUoRequerimiento) === Number(codigoUoActiva)))
+}
+
+/**
+ * Carga las subpestañas propias del usuario (sin filtro de fecha):
+ * - mis: registrados con su DNI (el SP expande todos sus iCodigo_Per históricos).
+ * - pendientes: donde es responsable vigente (le asignaron), sin cerrados.
+ * - noClasificados: Registrados (sin clasificar ni asignar) derivados a su unidad.
+ */
+export async function cargarPestanas(perfil = null, codigoUoActiva = 0) {
+  const codigoPersonaGr = perfil?.codigoPersonaGr
+  if (!codigoPersonaGr) {
+    return { mis: [], pendientes: [], noClasificados: [], online: false, errorMessage: 'No hay usuario logueado.' }
+  }
+
+  const consultas = [
+    buscarRequerimientos({ codigoPersonaSolicitante: codigoPersonaGr, vigencia: 1 }),
+    buscarRequerimientos({ codigoPersonaResponsable: codigoPersonaGr, vigencia: 1 }),
+    cargarNoClasificados(codigoUoActiva),
   ]
-}
 
-/**
- * Agrupa requerimientos "Mis requerimientos"
- * mediante códigos de estado, consolidando cierres y separando "No conforme".
- */
-export function construirTablero(requerimientos) {
-  const columns = COLUMNAS_MIS_REQUERIMIENTOS.map((col) => {
-    const reqs = requerimientos.filter((r) => col.estados.includes(r.codigoEstado))
-    return { title: col.title, tone: col.tone, total: reqs.length, cards: reqs.map(aTarjeta) }
-  })
+  const resultados = await Promise.allSettled(consultas)
+  const valor = (r) => (r.status === 'fulfilled' ? r.value || [] : [])
+  const errores = resultados.filter((r) => r.status === 'rejected')
+  errores.forEach((e) => console.error('No se pudo cargar una subpestaña.', e.reason))
 
-  const metrics = columns.map((c) => [c.title, String(c.total), 'briefcase'])
-
-  return { metrics, columns }
-}
-
-/**
- * Mis requerimientos: filtra únicamente los registrados por el usuario logueado
- */
-export async function cargarTablero(perfil = null) {
-  const codigoPersonaGr = perfil?.codigoPersonaGr
-
-  if (!codigoPersonaGr) {
-    return { ...construirTablero([]), online: true }
+  return {
+    mis: valor(resultados[0]),
+    pendientes: sinCerrados(valor(resultados[1])),
+    noClasificados: valor(resultados[2]),
+    online: errores.length === 0,
+    errorMessage: errores[0]?.reason?.message || '',
   }
+}
 
+/**
+ * Búsqueda contra el backend (solo los filtros que acepta /buscar).
+ * Con número no se acota por fecha: un número puede ser de cualquier fecha.
+ */
+export async function buscarAvanzado({ numero = 0, codigoEstado = 0, fechaInicio = 'TODO', fechaFin = 'TODO' } = {}) {
+  const filtros = { numero, codigoEstado, vigencia: 3 }
+  if (!numero) {
+    filtros.fechaInicio = fechaInicio || 'TODO'
+    filtros.fechaFin = fechaFin || 'TODO'
+  }
   try {
-    const requerimientos = await buscarRequerimientos({ codigoPersonaSolicitante: codigoPersonaGr, vigencia: 1 })
-    return { ...construirTablero(requerimientos), online: true }
+    const requerimientos = await buscarRequerimientos(filtros)
+    return { requerimientos: requerimientos || [], online: true }
   } catch (error) {
-//  Imprime el error técnico completo en consola (CORS, 500, red) para depuración.
-    console.error('No se pudo conectar con service-requerimiento.', error)
-    return {
-      ...construirTablero([]),
-      online: false,
-      error,
-      errorMessage: error?.message || 'Error desconocido',
-    }
+    console.error('No se pudo ejecutar la búsqueda avanzada.', error)
+    return { requerimientos: [], online: false, errorMessage: error?.message || 'Error desconocido' }
   }
 }
 
 /**
- * Mis pendientes: items a resolver por el usuario como responsable actual
- * (por asignar/atender, o no conforme reasignado) o solicitante (por conformar)
+ * Con búsqueda,
+ * Con N° de requerimiento no se acota por fecha (un número puede ser de cualquier fecha).
  */
-export async function cargarPendientes(perfil = null) {
-  const codigoPersonaGr = perfil?.codigoPersonaGr
-
-  if (!codigoPersonaGr) {
-    return {
-      metrics: mockMetricsPendientes,
-      columns: mockColumnsPendientes,
-      online: false,
-      errorMessage: 'No hay usuario logueado.',
-    }
+export function cumpleFiltros(r, f) {
+  const contiene = (valor, texto) => String(valor || '').toLowerCase().includes(texto.toLowerCase())
+  if (f.numero && r.codigoRequerimiento !== f.numero) return false
+  if (f.estado && r.codigoEstado !== f.estado) return false
+  if (!f.numero) {
+    const fecha = String(r.fechaRegistro || '').slice(0, 10) // yyyy-MM-dd
+    if (f.fechaInicio && fecha < f.fechaInicio) return false
+    if (f.fechaFin && fecha > f.fechaFin) return false
   }
+  if (f.solicitante && !contiene(r.solicitante, f.solicitante)) return false
+  if (f.responsable && !contiene(r.responsable, f.responsable)) return false
+  if (f.prioridad && String(r.prioridad || '').trim().toLowerCase() !== f.prioridad.toLowerCase()) return false
+  if (f.categoria && r.codigoCategoria !== f.categoria) return false
+  if (f.subcategoria && r.codigoSubcategoria !== f.subcategoria) return false
+  return true
+}
 
-  try {
-    const [comoResponsable, porConformidad] = await Promise.all([
-      buscarRequerimientos({ codigoPersonaResponsable: codigoPersonaGr, vigencia: 1 }),
-      buscarRequerimientos({ codigoPersonaSolicitante: codigoPersonaGr, codigoEstado: ESTADO.ATENDIDO, vigencia: 1 }),
-    ])
-
-    const porAsignar = comoResponsable.filter((r) => r.codigoEstado === ESTADO.POR_ASIGNAR)
-    const porAtender = comoResponsable.filter((r) => [ESTADO.ASIGNADO, ESTADO.EN_PROCESO].includes(r.codigoEstado))
-    const noConforme = comoResponsable.filter((r) => r.codigoEstado === ESTADO.NO_CONFORME)
-
-    const columns = [
-      { title: 'Por asignar', tone: 'amber', total: porAsignar.length, cards: porAsignar.map(aTarjeta) },
-      { title: 'Por atender', tone: 'blue', total: porAtender.length, cards: porAtender.map(aTarjeta) },
-      
-      // "Por autorizar" todavía no se puede completar con datos reales:
-      // solo visual, aun sin empoint  
-      { title: 'Por autorizar', tone: 'slate', total: 0, cards: [] },
-      { title: 'Por dar conformidad', tone: 'purple', total: porConformidad.length, cards: porConformidad.map(aTarjeta) },
-      { title: 'No conforme', tone: 'rose', total: noConforme.length, cards: noConforme.map(aTarjeta) },
-    ]
-
-    const metrics = columns.map((c) => [c.title, String(c.total), 'briefcase'])
-
-    return { metrics, columns, online: true }
-  } catch (error) {
-    console.error('No se pudo conectar con service-requerimiento, usando datos de referencia.', error)
-    return {
-      metrics: mockMetricsPendientes,
-      columns: mockColumnsPendientes,
-      online: false,
-      error,
-      errorMessage: error?.message || 'Error desconocido',
-    }
-  }
+/**
+ * Con búsqueda, cada pestaña muestra SOLO lo suyo que cumple los filtros
+ * (subconjunto de su total sin filtros: si Mis pendientes tiene 22 y 10 caen
+ * en el rango, muestra 10). Otros = lo encontrado que no está en ninguna de las tres.
+ */
+export function repartirResultados(datos, resultadosBusqueda, filtros) {
+  const mis = datos.mis.filter((r) => cumpleFiltros(r, filtros))
+  const pendientes = datos.pendientes.filter((r) => cumpleFiltros(r, filtros))
+  const noClasificados = datos.noClasificados.filter((r) => cumpleFiltros(r, filtros))
+  const propios = new Set([...datos.mis, ...datos.pendientes, ...datos.noClasificados].map((r) => r.codigoRequerimiento))
+  const otros = resultadosBusqueda.filter((r) => !propios.has(r.codigoRequerimiento) && cumpleFiltros(r, filtros))
+  return { mis, pendientes, noClasificados, otros }
 }
