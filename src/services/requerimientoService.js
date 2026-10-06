@@ -17,3 +17,25 @@ export function buscarRequerimientos(filtros = {}) {
 export function asignarRequerimiento(payload) {
   return http.post('/api/requerimiento/asignar', payload)
 }
+
+/**
+ * Cargos autorizados para un requerimiento según su categoría/subcategoría.
+ * GET /api/requerimiento/buscarCargo?TipBus=&codigoReq=&codigoCat=&Codigo_SubCat=
+ */
+export function buscarCargosAutorizados({ tipBus, codigoReq, codigoCat, codigoSubCat }) {
+  return http.get('/api/requerimiento/buscarCargo', {
+    TipBus: tipBus,
+    codigoReq,
+    codigoCat,
+    Codigo_SubCat: codigoSubCat,
+  })
+}
+
+/**
+ * Solicita la autorización de un requerimiento a una o más personas.
+ * payload: { codRequerimiento, codPerAutoriza ('1001,1002'), codPerSolAutorizacion,
+ *            codPerHelpDesk, codPerActualiza, observacion }
+ */
+export function solicitarAutorizacion(payload) {
+  return http.post('/api/requerimiento/solicitar', payload)
+}

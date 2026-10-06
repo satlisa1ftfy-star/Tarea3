@@ -1,13 +1,15 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { listarPersonas } from '../../services/personaService'
+import { normalizarTexto, usePersonasCatalogo } from '../../controllers/usePersonasCatalogo'
+import { solicitarAutorizacion } from '../../services/requerimientoService'
+import { cargarCargosAutorizados } from '../../models/cargo'
 import Icon from '../Icon.vue'
 
 // -------------------------------------------------------------------------
 // Solicitar autorización: modal con Motivo (obligatorio) y selección múltiple
-// de personas que autorizan. Las personas se cargan de la UO del rol activo
-// (GET /api/personas). Aún no existe endpoint para registrar la solicitud en
-// service-requerimiento, así que el envío solo arma el payload.   ***********PENDIENTE***********
+// de personas que autorizan. Las personas salen del catálogo en memoria
+// (GET /api/personas?vigencia=1, descargado una sola vez) y la solicitud se
+// envía a POST /api/requerimiento/solicitar.
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -15,58 +17,80 @@ const props = defineProps({
   requerimiento: { type: Array, default: null },          // tarjeta seleccionada (selectedRequest)
   estado: { type: String, default: '' },                  // título de la columna (selectedColumn.title)
   codigoRequerimiento: { type: Number, default: null },   // codigoRequerimientoSeleccionado() del Dashboard
-  unidadOrganica: { type: Object, default: null },        // unidadOrganicaPropia del Dashboard
+  unidadOrganica: { type: Object, default: null },        // ya no se usa: el catálogo trae todas las UO
 })
 const emit = defineEmits(['cerrar', 'solicitudPreparada'])
 
 const LARGO_MAXIMO_OBSERVACION = 2000 // Nota del sistema antiguo: máx. 2000 caracteres
 
-// Lista de referencia usada solo si no hay UO en el perfil o falla /api/personas.
-const PERSONAS_AUTORIZADORAS_MOCK = [
-  { codigoPersona: 'MOCK-1', nombre: 'Gordon David', cargo: 'Gerente (mock)' },
-  { codigoPersona: 'MOCK-2', nombre: 'Cruz Blades', cargo: 'Jefe de División (mock)' },
-  { codigoPersona: 'MOCK-3', nombre: 'Daniel Blades', cargo: 'Jefe de Unidad (mock)' },
-  { codigoPersona: 'MOCK-4', nombre: 'Galvez Dionisio', cargo: 'Jefe de Unidad (mock)' },
-  { codigoPersona: 'MOCK-5', nombre: 'Gustavo Dionisio', cargo: 'Jefe de Unidad (mock)' },
-  { codigoPersona: 'MOCK-6', nombre: 'Gian Dionisio', cargo: 'Jefe de Unidad (mock)' },
-  { codigoPersona: 'MOCK-7', nombre: 'Luis Dionisio', cargo: 'Jefe de Unidad (mock)' },
-  { codigoPersona: 'MOCK-8', nombre: 'Jose Dionisio', cargo: 'Jefe de Unidad (mock)' },
-  { codigoPersona: 'MOCK-9', nombre: 'Danye Dionisio', cargo: 'Jefe de Unidad (mock)' },
-]
+// personasCatalogo: todas las personas vigentes (compartido, se descarga una sola vez).
+const { personasCatalogo, cargandoPersonas, errorPersonas, cargarCatalogoPersonas } = usePersonasCatalogo()
 
 const motivoAutorizacion = ref('')
-const personasAutorizacion = ref([])
 const autorizadoresSeleccionados = ref([])
 const autorizadorTexto = ref('')
-const cargandoAutorizadores = ref(false)
-const usandoMockAutorizadores = ref(false)
 const enviandoAutorizacion = ref(false)
 const errorAutorizacion = ref('')
 
-// Cada vez que se abre el modal: limpia el formulario y carga las personas.
-async function inicializarModal() {
+// -------------------------------------------------------------------------
+// Cargos autorizados (GET /api/requerimiento/buscarCargo): lista informativa,
+// independiente de la selección de personas. Categoría y subcategoría vienen
+// en las posiciones [5] y [6] de la tarjeta del requerimiento (models/dashboard.js).
+const cargosAutorizados = ref([])
+const cargandoCargos = ref(false)
+const errorCargos = ref('')
+const faltanDatosCargos = ref(false)
+
+const parametrosCargos = computed(() => ({
+  codigoReq: props.codigoRequerimiento,
+  codigoCat: props.requerimiento?.[5] ?? null,
+  codigoSubCat: props.requerimiento?.[6] ?? null,
+}))
+
+let consultaCargosActual = ''
+async function cargarCargos() {
+  const parametros = parametrosCargos.value
+  const clave = `${parametros.codigoReq}|${parametros.codigoCat}|${parametros.codigoSubCat}`
+  consultaCargosActual = clave
+  errorCargos.value = ''
+  faltanDatosCargos.value = false
+
+  if (parametros.codigoReq == null || parametros.codigoCat == null || parametros.codigoSubCat == null) {
+    cargosAutorizados.value = []
+    faltanDatosCargos.value = true
+    return
+  }
+
+  cargandoCargos.value = true
+  try {
+    const cargos = await cargarCargosAutorizados(parametros)
+    if (consultaCargosActual === clave) cargosAutorizados.value = cargos
+  } catch (error) {
+    console.error('No se pudieron cargar los cargos autorizados.', error)
+    if (consultaCargosActual === clave) {
+      cargosAutorizados.value = []
+      errorCargos.value = 'No se pudieron cargar los cargos autorizados.'
+    }
+  } finally {
+    if (consultaCargosActual === clave) cargandoCargos.value = false
+  }
+}
+
+// Si cambia el requerimiento con el modal abierto, se consultan sus cargos
+// (cargarCargosAutorizados reutiliza lo ya consultado con los mismos parámetros).
+watch(parametrosCargos, () => {
+  if (props.visible) cargarCargos()
+})
+
+// Cada vez que se abre el modal: limpia el formulario y pide el catálogo.
+// Si ya está en memoria, cargarCatalogoPersonas() no vuelve a llamar al endpoint.
+function inicializarModal() {
   motivoAutorizacion.value = ''
   autorizadoresSeleccionados.value = []
   autorizadorTexto.value = ''
   errorAutorizacion.value = ''
-
-  const uo = props.unidadOrganica
-  usandoMockAutorizadores.value = false
-  if (!uo) {
-    personasAutorizacion.value = PERSONAS_AUTORIZADORAS_MOCK
-    usandoMockAutorizadores.value = true
-    return
-  }
-  cargandoAutorizadores.value = true
-  try {
-    personasAutorizacion.value = await listarPersonas({ codigoUo: uo.codigoUo, vigencia: 1 })
-  } catch (error) {
-    console.error('No se pudieron cargar las personas para autorizar.', error)
-    personasAutorizacion.value = PERSONAS_AUTORIZADORAS_MOCK
-    usandoMockAutorizadores.value = true
-  } finally {
-    cargandoAutorizadores.value = false
-  }
+  cargarCatalogoPersonas()
+  cargarCargos()
 }
 
 watch(() => props.visible, (abierto) => {
@@ -95,21 +119,18 @@ function alternarAutorizador(persona) {
   }
 }
 
-// Filtro local sobre la lista cargada (nombre, cargo y unidad orgánica, campos
-// que devuelve GET /api/personas). Solo decide qué filas se ven en la grilla:
-// no toca personasAutorizacion ni autorizadoresSeleccionados.
-const autorizadoresFiltrados = computed(() => {
-  const texto = autorizadorTexto.value.trim().toLowerCase()
-  if (!texto) return personasAutorizacion.value
-  return personasAutorizacion.value.filter((p) =>
-    [p.nombre, p.cargo, p.unidadOrganica].some((campo) => (campo || '').toLowerCase().includes(texto))
+// personasFiltradas: filtro en memoria por nombre, cargo y unidad orgánica, sin
+// distinguir mayúsculas ni tildes. Solo decide qué filas se ven en la grilla:
+// no toca personasCatalogo ni autorizadoresSeleccionados.
+const personasFiltradas = computed(() => {
+  const texto = normalizarTexto(autorizadorTexto.value.trim())
+  if (!texto) return personasCatalogo.value
+  return personasCatalogo.value.filter((p) =>
+    normalizarTexto(p.nombre).includes(texto) ||
+    normalizarTexto(p.cargo).includes(texto) ||
+    normalizarTexto(p.unidadOrganica).includes(texto)
   )
 })
-
-// Las columnas Cargo y Unidad Orgánica se muestran solo si algún registro las trae
-// (el MOCK no tiene unidad orgánica).
-const mostrarColumnaCargo = computed(() => personasAutorizacion.value.some((p) => p.cargo))
-const mostrarColumnaUnidad = computed(() => personasAutorizacion.value.some((p) => p.unidadOrganica))
 
 const puedeEnviarAutorizacion = computed(() =>
   motivoAutorizacion.value.trim().length > 0 && autorizadoresSeleccionados.value.length > 0
@@ -127,8 +148,17 @@ async function enviarSolicitudAutorizacion() {
       codigosPersonaAutoriza: autorizadoresSeleccionados.value.map(claveAutorizador),
       motivo: motivoAutorizacion.value.trim(),
     }
-    // TODO: reemplazar por la llamada al endpoint cuando exista en service-requerimiento.
-    console.info('Solicitud de autorización (pendiente de endpoint):', payload)
+    // Cuerpo de SolicitarAutorizaRequerimientoRequest (service-requerimiento).
+    // codPerHelpDesk y codPerActualiza también se envían porque el backend los
+    // usa al armar el XML del SP y Map.of no admite valores nulos.
+    await solicitarAutorizacion({
+      codRequerimiento: payload.codigoRequerimiento,
+      codPerAutoriza: payload.codigosPersonaAutoriza.join(','),
+      codPerSolAutorizacion: payload.codigoPersonaSolicita != null ? String(payload.codigoPersonaSolicita) : null,
+      codPerHelpDesk: payload.codigoPersonaSolicita,
+      codPerActualiza: payload.codigoPersonaActualizacion,
+      observacion: payload.motivo,
+    })
     emit('solicitudPreparada', payload)
   } catch (error) {
     console.error('No se pudo solicitar la autorización.', error)
@@ -157,6 +187,33 @@ async function enviarSolicitudAutorizacion() {
         </div>
       </div>
 
+      <!-- Cargos autorizados: solo informativo (sin buscador ni selección) -->
+      <div class="form-field">
+        <label>Cargos autorizados</label>
+        <p v-if="cargandoCargos" class="form-hint">Cargando cargos autorizados...</p>
+        <p v-else-if="errorCargos" class="conn-status conn-status--offline">⚠ {{ errorCargos }}</p>
+        <p v-else-if="faltanDatosCargos" class="form-hint">No se pueden consultar los cargos: el requerimiento no tiene categoría o subcategoría.</p>
+        <p v-else-if="!cargosAutorizados.length" class="form-hint">No existen cargos autorizados para este requerimiento.</p>
+        <div v-else class="autorizadores-grilla cargos-grilla">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-codigo">Código</th>
+                <th>Cargo</th>
+                <th class="col-aprob">Aprob</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="cargo in cargosAutorizados" :key="cargo.codigoCargo">
+                <td class="col-codigo">{{ cargo.codigoCargo }}</td>
+                <td>{{ cargo.nombreCargo }}</td>
+                <td class="col-aprob">{{ cargo.tipAprob || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="form-field">
         <label>Personas que autorizan *</label>
 
@@ -177,25 +234,30 @@ async function enviarSolicitudAutorizacion() {
           <Icon name="search" :size="15" />
           <input
             v-model="autorizadorTexto"
-            :placeholder="cargandoAutorizadores ? 'Cargando...' : 'Nombre, cargo o unidad...'"
-            :disabled="cargandoAutorizadores"
+            :placeholder="cargandoPersonas ? 'Cargando personas...' : 'Nombre, cargo o unidad...'"
+            :disabled="cargandoPersonas"
             autocomplete="off"
           >
         </label>
 
-        <div v-if="!cargandoAutorizadores && autorizadoresFiltrados.length" class="autorizadores-grilla">
+        <p v-if="cargandoPersonas" class="form-hint">Cargando personas...</p>
+        <p v-else-if="errorPersonas" class="conn-status conn-status--offline">
+          ⚠ No se pudo cargar el catálogo de personas: {{ errorPersonas }}
+          <button type="button" @click="cargarCatalogoPersonas">Reintentar</button>
+        </p>
+        <div v-else-if="personasFiltradas.length" class="autorizadores-grilla">
           <table>
             <thead>
               <tr>
                 <th class="col-check"></th>
                 <th>Persona</th>
-                <th v-if="mostrarColumnaCargo">Cargo</th>
-                <th v-if="mostrarColumnaUnidad">Unidad Orgánica</th>
+                <th>Cargo</th>
+                <th>Unidad Orgánica</th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="p in autorizadoresFiltrados"
+                v-for="p in personasFiltradas"
                 :key="claveAutorizador(p)"
                 :class="{ seleccionada: estaSeleccionadoAutorizador(p) }"
                 @click="alternarAutorizador(p)"
@@ -204,18 +266,17 @@ async function enviarSolicitudAutorizacion() {
                   <input type="checkbox" :checked="estaSeleccionadoAutorizador(p)" @click.stop @change="alternarAutorizador(p)">
                 </td>
                 <td>{{ p.nombre }}</td>
-                <td v-if="mostrarColumnaCargo">{{ p.cargo || '—' }}</td>
-                <td v-if="mostrarColumnaUnidad">{{ p.unidadOrganica || '—' }}</td>
+                <td>{{ p.cargo || '—' }}</td>
+                <td>{{ p.unidadOrganica || '—' }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p v-else-if="!cargandoAutorizadores" class="form-hint">No hay personas que coincidan.</p>
+        <p v-else class="form-hint">No hay personas que coincidan.</p>
 
         <p class="autorizadores-contador">
           {{ autorizadoresSeleccionados.length }} {{ autorizadoresSeleccionados.length === 1 ? 'persona seleccionada' : 'personas seleccionadas' }}
         </p>
-        <p v-if="usandoMockAutorizadores" class="form-hint">Mostrando lista de prueba: no se pudo obtener el personal de tu unidad orgánica.</p>
       </div>
 
       <div class="form-field">
@@ -259,5 +320,10 @@ async function enviarSolicitudAutorizacion() {
 .autorizadores-grilla tbody tr.seleccionada td:nth-child(2){color:var(--blue);font-weight:600}
 .autorizadores-grilla .col-check{width:36px;text-align:center}
 .form-field .autorizadores-grilla input[type="checkbox"]{width:auto;margin:0;padding:0}
+.cargos-grilla{max-height:140px}
+.cargos-grilla tbody tr{cursor:default}
+.cargos-grilla tbody tr:hover{background:none}
+.cargos-grilla .col-codigo{width:70px}
+.cargos-grilla .col-aprob{width:60px;text-align:center}
 .autorizadores-contador{margin:2px 0 0;color:var(--muted);font-size:11.5px;font-weight:600}
 </style>

@@ -18,9 +18,9 @@ export function useAuthController() {
   if (import.meta.env.DEV) {
       isAuthenticated.value = true
       perfil.value = {
-          codigoPersonaGr: 12345,
+          codigoPersonaGr: 6043,
           nombre: 'Usuario Desarrollo',
-          usuarioWindows: 'DEVUSER'
+          usuarioWindows: 'jhperez'
       }
   }
 

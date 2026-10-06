@@ -91,6 +91,8 @@ function aTarjeta(req) {
     req.unidadOrganicaSolicitante || req.unidadOrganicaRequerimiento || '-',
     formatearFecha(req.fechaRegistro),
     req.prioridad || 'Media',
+    req.codigoCategoria ?? null,     // [5] usado por "Cargos autorizados" (Solicitar autorización)
+    req.codigoSubcategoria ?? null,  // [6] usado por "Cargos autorizados" (Solicitar autorización)
   ]
 }
 
