@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import java.security.Key;
 
 
-@Component
+//@Component
 public class JwtTokenUtil {
     private final Key key;
 

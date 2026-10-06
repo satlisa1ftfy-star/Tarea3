@@ -4,6 +4,7 @@ import com.coresales.service.requerimiento.model.*;
 import com.coresales.service.requerimiento.service.IRequerimientoAsignacionService;
 import com.coresales.service.requerimiento.service.IRequerimientoService;
 import com.coresales.service.requerimiento.service.IRequerimientoAutorizarService;
+import com.coresales.service.requerimiento.service.IRequerimientoSolicitaAutorizaService;
 import com.coresales.service.requerimiento.util.AuditoriaContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -27,12 +28,14 @@ public class RequerimientoController {
     private final IRequerimientoService requerimientoService;
     private final IRequerimientoAsignacionService requerimientoAsignacionService;
     private final IRequerimientoAutorizarService requerimientoAutorizarService;
+    private final IRequerimientoSolicitaAutorizaService requerimientoSolicitaAutorizaService;
     private final AuditoriaContext auditoriaContext;
 
     public RequerimientoController(
             IRequerimientoService requerimientoService,
             IRequerimientoAsignacionService requerimientoAsignacionService,
             IRequerimientoAutorizarService requerimientoAutorizarService,
+            IRequerimientoSolicitaAutorizaService requerimientoSolicitaAutorizaService,
             AuditoriaContext auditoriaContext
 
     ) {
@@ -40,8 +43,8 @@ public class RequerimientoController {
                 requerimientoService;
         this.requerimientoAsignacionService =
                 requerimientoAsignacionService;
-        this.requerimientoAutorizarService =
-                requerimientoAutorizarService;
+        this.requerimientoAutorizarService =requerimientoAutorizarService;
+        this.requerimientoSolicitaAutorizaService = requerimientoSolicitaAutorizaService;
         this.auditoriaContext=auditoriaContext;
     }
 
@@ -222,6 +225,23 @@ public class RequerimientoController {
         System.out.println(solicitud);
         return ResponseEntity.ok(
                 requerimientoAutorizarService.autorizar(
+                        solicitud
+                )
+        );
+    }
+
+    @PostMapping("/solicitar")
+    @Operation( summary = "Solicitar Autorizacion requerimiento",
+            description = "Solicitar Autorizacion"
+    )
+    public ResponseEntity<RequerimientoResultado> solicitar(
+            //@Valid
+            @RequestBody SolicitarAutorizaRequerimientoRequest solicitud
+    ) {
+        solicitud.setNomTerminal(auditoriaContext.getIpCliente());
+
+        return ResponseEntity.ok(
+                requerimientoSolicitaAutorizaService.solicitarAutorizacion(
                         solicitud
                 )
         );

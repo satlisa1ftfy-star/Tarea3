@@ -71,7 +71,6 @@ public class RequerimientoRepositoryImpl
 
         List<Requerimiento> requerimientos =
                 new ArrayList<>();
-
         for (Object[] fila : resultados) {
 
             Requerimiento requerimiento =
@@ -214,6 +213,7 @@ public class RequerimientoRepositoryImpl
 
             requerimientos.add(requerimiento);
         }
+        System.out.println( requerimientos.toString() );
 
         return requerimientos;
     }
