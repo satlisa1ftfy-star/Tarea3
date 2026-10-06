@@ -20,6 +20,7 @@ public interface RequerimientoRepository {
             Integer codigoUoSolicitante,
             Integer codigoPersonaResponsable,
             Integer codigoUoResponsable,
+            Integer codigoUoRequerimiento,
             Integer codigoEstado,
             Integer vigencia
     );

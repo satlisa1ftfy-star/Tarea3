@@ -40,6 +40,7 @@ public class RequerimientoRepositoryImpl
             Integer codigoUoSolicitante,
             Integer codigoPersonaResponsable,
             Integer codigoUoResponsable,
+            Integer codigoUoRequerimiento,
             Integer codigoEstado,
             Integer vigencia
     ) {
@@ -55,6 +56,7 @@ public class RequerimientoRepositoryImpl
                         "iCodUoSolicitante=\"" + codigoUoSolicitante + "\" " +
                         "iCodigoPerResponsable=\"" + codigoPersonaResponsable + "\" " +
                         "iCodUoResponsable=\"" + codigoUoResponsable + "\" " +
+                        "iCodUoRequerimiento=\"" + codigoUoRequerimiento + "\" " +
                         "siCodigoEst=\"" + codigoEstado + "\" " +
                         "siVigencia=\"" + vigencia + "\" " +
                         "/>" +

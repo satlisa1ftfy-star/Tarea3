@@ -2,12 +2,16 @@ package com.coresales.service.requerimiento.controller;
 
 import com.coresales.service.requerimiento.model.AsignarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.ClasificarRequerimientoRequest;
+import com.coresales.service.requerimiento.model.DocumentoAdjuntoDetalle;
+import com.coresales.service.requerimiento.model.HistorialRequerimiento;
 import com.coresales.service.requerimiento.model.RegistrarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.Requerimiento;
 import com.coresales.service.requerimiento.model.RequerimientoAsignado;
+import com.coresales.service.requerimiento.model.RequerimientoDetalle;
 import com.coresales.service.requerimiento.model.RequerimientoDetalleDTO;
 import com.coresales.service.requerimiento.model.RequerimientoRegistroResponse;
 import com.coresales.service.requerimiento.service.IRequerimientoAsignacionService;
+import com.coresales.service.requerimiento.service.IRequerimientoDetalleService;
 import com.coresales.service.requerimiento.service.IRequerimientoService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -33,15 +37,19 @@ public class RequerimientoController {
 
     private final IRequerimientoService requerimientoService;
     private final IRequerimientoAsignacionService requerimientoAsignacionService;
+    private final IRequerimientoDetalleService requerimientoDetalleService;
 
     public RequerimientoController(
             IRequerimientoService requerimientoService,
-            IRequerimientoAsignacionService requerimientoAsignacionService
+            IRequerimientoAsignacionService requerimientoAsignacionService,
+            IRequerimientoDetalleService requerimientoDetalleService
     ) {
         this.requerimientoService =
                 requerimientoService;
         this.requerimientoAsignacionService =
                 requerimientoAsignacionService;
+        this.requerimientoDetalleService =
+                requerimientoDetalleService;
     }
 
     @GetMapping("/buscar")
@@ -60,6 +68,7 @@ public class RequerimientoController {
                     - codigoUoSolicitante = 0
                     - codigoPersonaResponsable = 0
                     - codigoUoResponsable = 0
+                    - codigoUoRequerimiento = 0 (UO de la ubicación actual)
                     - codigoEstado = 0
                     - vigencia = 3 (1 = vigente, 2 = no vigente, 3 = todos)
 
@@ -149,6 +158,16 @@ public class RequerimientoController {
             Integer codigoUoResponsable,
 
             @Parameter(
+                    description = "Código de unidad orgánica de la ubicación actual del requerimiento. 0 = todas.",
+                    example = "0"
+            )
+            @RequestParam(
+                    required = false,
+                    defaultValue = "0"
+            )
+            Integer codigoUoRequerimiento,
+
+            @Parameter(
                     description = "Código del estado. 0 = todos.",
                     example = "0"
             )
@@ -179,6 +198,7 @@ public class RequerimientoController {
                         codigoUoSolicitante,
                         codigoPersonaResponsable,
                         codigoUoResponsable,
+                        codigoUoRequerimiento,
                         codigoEstado,
                         vigencia
                 )
@@ -255,6 +275,61 @@ public class RequerimientoController {
         solicitud.setRequerimientoId(id);
         requerimientoService.clasificar(solicitud, obtenerIpCliente(httpRequest));
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/detalle/{codigo}")
+    @Operation(
+            summary = "Detalle de requerimiento",
+            description = """
+                    Datos de la pantalla "Detalle de Requerimiento" del legado
+                    incluye medio de envío, ubicación actual y correos copia.
+                    """
+    )
+    public ResponseEntity<RequerimientoDetalle> detalle(
+            @Parameter(description = "Número de requerimiento.", example = "280177")
+            @PathVariable
+            Integer codigo
+    ) {
+        return ResponseEntity.ok(
+                requerimientoDetalleService.consultarDetalle(codigo)
+        );
+    }
+
+    @GetMapping("/historial/{codigo}")
+    @Operation(
+            summary = "Historial de requerimiento",
+            description = """
+                    Movimientos del requerimiento, del más reciente al más antiguo
+                    (spGR_Requerimiento_ConsultarHistorial, siTipBus = 1).
+                    """
+    )
+    public ResponseEntity<List<HistorialRequerimiento>> historial(
+            @Parameter(description = "Número de requerimiento.", example = "280177")
+            @PathVariable
+            Integer codigo
+    ) {
+        return ResponseEntity.ok(
+                requerimientoDetalleService.consultarHistorial(codigo)
+        );
+    }
+
+    @GetMapping("/adjuntos/{codigo}")
+    @Operation(
+            summary = "Documentos adjuntos del requerimiento",
+            description = """
+                    Archivo cargado en el registro y adjuntos posteriores
+                    (spGR_Requerimiento_ConsultarDocumentoAdjunto, siTipBus = 1). Solo lista; la descarga
+                    Archivo adjuntos pendiente del servicio de documentos.
+                    """
+    )
+    public ResponseEntity<List<DocumentoAdjuntoDetalle>> adjuntos(
+            @Parameter(description = "Número de requerimiento.", example = "247676")
+            @PathVariable
+            Integer codigo
+    ) {
+        return ResponseEntity.ok(
+                requerimientoDetalleService.consultarAdjuntos(codigo)
+        );
     }
 
     /**

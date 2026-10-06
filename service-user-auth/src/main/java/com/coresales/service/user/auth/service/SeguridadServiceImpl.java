@@ -1,5 +1,6 @@
 package com.coresales.service.user.auth.service;
 
+import com.coresales.service.user.auth.model.SesionResponse;
 import com.coresales.service.user.auth.model.UsuarioRolDetalle;
 import com.coresales.service.user.auth.model.UsuarioSesion;
 import com.coresales.service.user.auth.repository.SeguridadRepository;
@@ -8,9 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -78,7 +77,7 @@ public class SeguridadServiceImpl
      */
     @Override
     @Transactional
-    public Map<String, Object> registrarInicioSesion(
+    public SesionResponse registrarInicioSesion(
             String usuarioWindows,
             Integer codigoPersonaRol,
             String nombreTerminal
@@ -116,14 +115,14 @@ public class SeguridadServiceImpl
                         recortar(nombreTerminal, 20)   // cNombreTerminal_Ac es Char(20)
                 );
 
-        Map<String, Object> respuesta = new LinkedHashMap<>();
-        respuesta.put("codigoIngreso", codigoIngreso);
-        respuesta.put("codigoSesion", codigoSesion);
-        respuesta.put("codigoPersonaGr", rol.getCodigoPersonaGr());
-        respuesta.put("codigoPersonaRol", rol.getCodigoPersonaRol());
-        respuesta.put("codigoRol", rol.getCodigoRol());
-        respuesta.put("nombreRol", rol.getNombreRol());
-        return respuesta;
+        return new SesionResponse(
+                codigoIngreso,
+                codigoSesion,
+                rol.getCodigoPersonaGr(),
+                rol.getCodigoPersonaRol(),
+                rol.getCodigoRol(),
+                rol.getNombreRol()
+        );
     }
 
     private String recortar(String valor, int maximo) {

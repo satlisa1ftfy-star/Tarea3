@@ -43,6 +43,7 @@ public class RequerimientoServiceImpl
             Integer codigoUoSolicitante,
             Integer codigoPersonaResponsable,
             Integer codigoUoResponsable,
+            Integer codigoUoRequerimiento,
             Integer codigoEstado,
             Integer vigencia
     ) {
@@ -101,6 +102,12 @@ public class RequerimientoServiceImpl
             codigoUoResponsable = 0;
         }
 
+        // UO de la ubicación actual del requerimiento
+        // 0 = todas
+        if (codigoUoRequerimiento == null) {
+            codigoUoRequerimiento = 0;
+        }
+
         // Estado
         // 0 = todos
         if (codigoEstado == null) {
@@ -122,6 +129,7 @@ public class RequerimientoServiceImpl
                 codigoUoSolicitante,
                 codigoPersonaResponsable,
                 codigoUoResponsable,
+                codigoUoRequerimiento,
                 codigoEstado,
                 vigencia
         );
