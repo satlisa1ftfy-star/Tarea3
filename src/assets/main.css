@@ -144,6 +144,7 @@
 .green .dot{background:var(--green)}
 .slate .dot{background:#7280a3}
 .rose .dot{background:var(--red)}
+.teal .dot{background:#14b8a6}
 
 .cards{padding:9px;display:grid;gap:9px}
 .empty-column{padding:16px 6px;color:var(--muted-2);font-size:11.5px;text-align:center}

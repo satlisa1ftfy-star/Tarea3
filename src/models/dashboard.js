@@ -1,4 +1,5 @@
 import { buscarRequerimientos } from '../services/requerimientoService'
+import { listarClasificados } from '../services/clasificadosStore'
 
 // (bloques "Conteo de requerimientos" / "Mis Requerimientos" del legado).
 export const ESTADO = {
@@ -92,6 +93,8 @@ function aTarjeta(req) {
     formatearFecha(req.fechaRegistro),
     req.prioridad || 'Media',
     req.codigoEstado, // [5] lo usa el botón «Clasificar» (solo estado Registrado)
+    req.categoria || '', // [6] y [7]: los muestra la columna «Clasificados»
+    req.subcategoria || '',
   ]
 }
 
@@ -108,6 +111,55 @@ export function construirTablero(requerimientos) {
   const metrics = columns.map((c) => [c.title, String(c.total), 'briefcase'])
 
   return { metrics, columns }
+}
+
+// Columna "Clasificados" (solo Operador): requerimientos a los que el usuario dio «Clasificar».
+export const COLUMNA_CLASIFICADOS = 'Clasificados'
+
+const MAX_CLASIFICADOS_VISIBLES = 30
+
+/**
+ * Requerimientos clasificados por el usuario. PROVISIONAL: el origen es el registro local
+ * (clasificadosStore), porque el backend no expone quién clasificó; es el único punto a cambiar.
+ * Cada número se consulta para mostrar su estado actual. Devuelve tarjetas (aTarjeta).
+ */
+export async function cargarClasificados(perfil = null) {
+  const codigos = listarClasificados(perfil).slice(0, MAX_CLASIFICADOS_VISIBLES)
+  const resultados = await Promise.allSettled(
+    codigos.map((numero) => buscarRequerimientos({ numero }))
+  )
+  return resultados
+    .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+    .map(aTarjeta)
+}
+
+const NOMBRE_ESTADO = {
+  [ESTADO.REGISTRADO]: 'Registrado',
+  [ESTADO.POR_ASIGNAR]: 'Por asignar',
+  [ESTADO.ASIGNADO]: 'Asignado',
+  [ESTADO.EN_PROCESO]: 'En proceso',
+  [ESTADO.ATENDIDO]: 'Atendido',
+  [ESTADO.CERRADO_CONFORME]: 'Cerrado conforme',
+  [ESTADO.CERRADO_RECHAZADO]: 'Cerrado rechazado',
+  [ESTADO.CERRADO_ANULADO]: 'Cerrado anulado',
+  [ESTADO.NO_CONFORME]: 'No conforme',
+  [ESTADO.CERRADO_NO_AUTORIZADO]: 'Cerrado no autorizado',
+  [ESTADO.CERRADO_POR_SISTEMA]: 'Cerrado por sistema',
+  [ESTADO.CERRADO_POR_REVERSION]: 'Cerrado por reversión',
+}
+
+export function nombreEstado(codigo) {
+  return NOMBRE_ESTADO[codigo] || '-'
+}
+
+/** Agrega la columna y la métrica «Clasificados» a un tablero ya construido. */
+export function conClasificados(tablero, cards = []) {
+  const columna = { title: COLUMNA_CLASIFICADOS, tone: 'teal', total: cards.length, cards }
+  return {
+    ...tablero,
+    columns: [...tablero.columns, columna],
+    metrics: [...tablero.metrics, [COLUMNA_CLASIFICADOS, String(cards.length), 'check']],
+  }
 }
 
 /**

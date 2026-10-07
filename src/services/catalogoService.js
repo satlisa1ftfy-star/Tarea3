@@ -1,4 +1,4 @@
-import { http } from './http'
+import { http, httpOrg } from './http'
 
 /**
  * Catálogos para Registro y Clasificación de requerimientos (service-requerimiento).
@@ -55,12 +55,12 @@ function normalizarUnidades(lista) {
 
 /** Unidades orgánicas a las que se puede solicitar (primer nivel del combo). */
 export async function listarUnidadesSolicitud() {
-  return normalizarUnidades(await http.get('/api/requerimiento/unidadesOrganicas/solicitud'))
+  return normalizarUnidades(await httpOrg.get('/api/organizacion/unidadesOrganicas/solicitud'))
 }
 
 /** Divisiones / unidades hijas de una unidad orgánica. */
 export async function listarDependencias(codigoUo) {
-  return normalizarUnidades(await http.get(`/api/requerimiento/unidadesOrganicas/${codigoUo}/dependencias`))
+  return normalizarUnidades(await httpOrg.get(`/api/organizacion/unidadesOrganicas/${codigoUo}/dependencias`))
 }
 
 /** Categorías de una unidad orgánica (0 = todas), con su activo. */

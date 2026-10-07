@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { ESTADO, buscarAvanzado, cargarPendientes, cargarTablero } from '../models/dashboard'
+import { COLUMNA_CLASIFICADOS, ESTADO, buscarAvanzado, cargarClasificados, cargarPendientes, cargarTablero, conClasificados, nombreEstado } from '../models/dashboard'
+import { registrarClasificado } from '../services/clasificadosStore'
 import { listarRoles } from '../services/seguridadService'
 import { listarPersonas } from '../services/personaService'
 import { buscarUnidadOrganica } from '../services/unidadOrganicaService'
@@ -268,6 +269,13 @@ function cerrarDetalle() {
   selectedColumn.value = null
 }
 
+// «Clasificados» no es un estado: ahí se muestra el estado real del requerimiento.
+const estadoActualLabel = computed(() =>
+  selectedColumn.value?.title === COLUMNA_CLASIFICADOS
+    ? nombreEstado(selectedRequest.value?.[5])
+    : selectedColumn.value?.title
+)
+
 // La conformidad se evalúa sobre requerimientos Atendidos
 // se solicita automáticamente por correo al llegar a Atendido.
 const puedeDarConformidad = computed(() => {
@@ -313,6 +321,8 @@ const puedeClasificar = computed(() =>
 )
 
 async function alClasificarRequerimiento() {
+  // Se anota antes de cerrar el detalle (después selectedRequest queda en null): alimenta «Clasificados».
+  registrarClasificado(props.perfil, codigoRequerimientoSeleccionado())
   mostrarModalClasificar.value = false
   cerrarDetalle()
   // Clasificar no cambia el estado: se vuelve a consultar para reflejar la nueva prioridad/categoría.
@@ -610,9 +620,13 @@ watch([roles, vista], () => {
 
 async function refrescar() {
   cargando.value = true
-  const tablero = vista.value === 'pendientes'
+  let tablero = vista.value === 'pendientes'
     ? await cargarPendientes(props.perfil)
     : await cargarTablero(props.perfil)
+  // «Clasificados»: solo el Operador, en Mis requerimientos.
+  if (vista.value === 'requerimientos' && perfilActivo.value?.nombreRol === 'Operador') {
+    tablero = conClasificados(tablero, await cargarClasificados(props.perfil))
+  }
   metrics.value = tablero.metrics
   columns.value = tablero.columns
   conectado.value = tablero.online
@@ -620,6 +634,11 @@ async function refrescar() {
   metricaSeleccionada.value = null // los datos cambiaron; no arrastrar el filtro anterior
   cargando.value = false
 }
+
+// Los roles se cargan después del primer refrescar(): al conocer/cambiar el rol se recalcula el tablero.
+watch(() => perfilActivo.value?.nombreRol, () => {
+  if (vista.value === 'requerimientos') refrescar()
+})
 
 // Limpia la búsqueda avanzada al cambiar de vista para evitar arrastrar filtros entre secciones.
 watch(vista, () => {
@@ -695,7 +714,7 @@ onMounted(() => {
           </button>
           <button class="nav-button" :class="{ selected: vista === 'requerimientos' }" @click="irARequerimientos('Tablero')" title="Mis requerimientos">
             <Icon name="folder" :size="17" /> <span>Mis requerimientos</span>
-            <b v-if="vista === 'requerimientos'" class="nav-badge">{{ columns.reduce((a, c) => a + c.total, 0) }}</b>
+            <b v-if="vista === 'requerimientos'" class="nav-badge">{{ columns.filter((c) => c.title !== COLUMNA_CLASIFICADOS).reduce((a, c) => a + c.total, 0) }}</b>
           </button>
           <p class="nav-section-label">HERRAMIENTAS</p>
           <button class="nav-button" title="Reportes"><Icon name="bar-chart" :size="17" /> <span>Reportes</span></button>
@@ -774,6 +793,7 @@ onMounted(() => {
                     </div>
                     <h3>{{ card[1] }}</h3>
                     <p class="card-area">{{ card[2] }}</p>
+                    <p v-if="column.title === COLUMNA_CLASIFICADOS" class="card-area">{{ nombreEstado(card[5]) }} · {{ card[6] }}<template v-if="card[7]"> / {{ card[7] }}</template></p>
                     <div class="tags"><span>Autorizado</span><span>Conf. pendiente</span></div>
                     <div class="card-footer">
                       <span class="card-date"><Icon name="calendar" :size="12" />{{ card[3] }}</span>
@@ -860,7 +880,7 @@ onMounted(() => {
           <button class="detail-back" @click="cerrarDetalle"><Icon name="arrow-left" :size="14" /> Volver al tablero</button>
           <div class="detail-title-row">
             <b>{{ selectedRequest[0] }}</b>
-            <span class="status-pill" :style="{ color: 'var(--blue)', background: '#eaf0ff' }">{{ selectedColumn?.title }}</span>
+            <span class="status-pill" :style="{ color: 'var(--blue)', background: '#eaf0ff' }">{{ estadoActualLabel }}</span>
             <span class="priority-badge" :class="selectedRequest[4].toLowerCase()">{{ selectedRequest[4] }}</span>
           </div>
           <h2 class="detail-subtitle">{{ selectedRequest[1] }}</h2>
@@ -886,7 +906,7 @@ onMounted(() => {
           <dl class="detail-grid">
             <div><dt>N° Requerimiento</dt><dd>{{ selectedRequest[0] }}</dd></div>
             <div><dt>Fecha</dt><dd>{{ selectedRequest[3] }}</dd></div>
-            <div><dt>Estado actual</dt><dd class="orange">{{ selectedColumn?.title }}</dd></div>
+            <div><dt>Estado actual</dt><dd class="orange">{{ estadoActualLabel }}</dd></div>
             <div><dt>Prioridad</dt><dd>{{ selectedRequest[4] }}</dd></div>
             <div style="grid-column:1/-1"><dt>Área solicitante</dt><dd>{{ selectedRequest[2] }}</dd></div>
           </dl>

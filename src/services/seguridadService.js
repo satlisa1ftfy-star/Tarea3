@@ -1,5 +1,5 @@
 import { authHttp } from './authHttp'
-import { http } from './http'
+import { http, httpOrg } from './http'
 
 /**
  * Login Windows mediante POST /api/auth/login ({ usuarioWindows }).
@@ -11,6 +11,7 @@ export async function login(usuarioWindows) {
   // service-requerimiento ahora tambien exige este token
   authHttp.setAuthToken(respuesta.token)
   http.setAuthToken(respuesta.token)
+  httpOrg.setAuthToken(respuesta.token)
 
   return {
     ...respuesta.perfil,
