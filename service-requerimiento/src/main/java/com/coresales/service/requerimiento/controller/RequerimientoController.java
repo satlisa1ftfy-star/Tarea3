@@ -1,5 +1,6 @@
 package com.coresales.service.requerimiento.controller;
 
+import com.coresales.service.requerimiento.dto.response.ConsultaSolicitudAutorizaResponse;
 import com.coresales.service.requerimiento.model.*;
 import com.coresales.service.requerimiento.service.IRequerimientoAsignacionService;
 import com.coresales.service.requerimiento.service.IRequerimientoService;
@@ -238,6 +239,8 @@ public class RequerimientoController {
             //@Valid
             @RequestBody SolicitarAutorizaRequerimientoRequest solicitud
     ) {
+        System.out.println(solicitud);
+
         solicitud.setNomTerminal(auditoriaContext.getIpCliente());
 
         return ResponseEntity.ok(
@@ -246,5 +249,25 @@ public class RequerimientoController {
                 )
         );
     }
+
+    @GetMapping("/consultarSolicitud")
+    @Operation( summary = "Consultar personas que autorizan",
+            description = "Consultar personas que autorizan"
+    )
+    public ResponseEntity<List<ConsultaSolicitudAutorizaResponse>> consultar(
+            //@Valid
+            @RequestParam(required = true)
+            Integer codigoRequerimiento
+    ) {
+        String tipBus="1";
+        return ResponseEntity.ok(
+                requerimientoSolicitaAutorizaService.consultarSolicitud(
+                        tipBus,
+                        codigoRequerimiento
+                )
+        );
+    }
+
+
 
 }

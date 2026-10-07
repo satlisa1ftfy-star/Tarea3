@@ -1,4 +1,5 @@
 package com.coresales.service.requerimiento.service;
+import com.coresales.service.requerimiento.dto.response.ConsultaSolicitudAutorizaResponse;
 import com.coresales.service.requerimiento.model.AutorizarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.RequerimientoResultado;
 import com.coresales.service.requerimiento.model.SolicitarAutorizaRequerimientoRequest;
@@ -6,6 +7,8 @@ import com.coresales.service.requerimiento.repository.RequerimientoAutorizarRepo
 import com.coresales.service.requerimiento.repository.RequerimientoSolicitaAutorizaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Service
 public class RequerimientoSolicitaAutorizaServiceImpl
@@ -31,7 +34,17 @@ public class RequerimientoSolicitaAutorizaServiceImpl
                 solicitud
         );
     }
+    @Override
+    @Transactional(readOnly = true)
+    public List<ConsultaSolicitudAutorizaResponse> consultarSolicitud(
+            String tipBus, Integer codigoRequerimiento
+    ) {
 
+        //validar(solicitud);
+        return  requerimientoSolicitaAutorizaRepository.consultarSolicitud(
+                tipBus, codigoRequerimiento
+        );
+    }
     //private void validar(AutorizarRequerimientoRequest solicitud) {
     //}
 }
