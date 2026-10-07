@@ -31,7 +31,9 @@ public class SecurityConfig {
                                         "/swagger-ui.html",
                                         "/v3/api-docs/**",
                                         "/v3/api-docs.yaml",
-                                        "/webjars/**"
+                                        "/webjars/**",
+                                        // sin esto, un error (400/500) reenviado a /error se ve como 403
+                                        "/error"
                                 ).permitAll()
                                 .anyRequest().authenticated()
                 )

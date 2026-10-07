@@ -8,4 +8,8 @@ public interface UnidadOrganicaRepository {
     List<UnidadOrganica> buscarPorNombre(
             String nombre
     );
+
+    List<UnidadOrganica> listarParaSolicitud();
+
+    List<UnidadOrganica> buscarPorPadre(Integer codigoUoPadre);
 }

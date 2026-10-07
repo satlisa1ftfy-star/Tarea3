@@ -12,7 +12,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/organizacion")
-@CrossOrigin("http://localhost:5173")
+@CrossOrigin({"http://localhost:5173", "http://localhost:5174"})
 @Tag(
         name = "Organización",
         description = "Consulta de unidades orgánicas y personal (BD Organizacion)"

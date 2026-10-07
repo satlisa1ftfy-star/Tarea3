@@ -12,7 +12,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/organizacion")
-@CrossOrigin("http://localhost:5173")
+@CrossOrigin({"http://localhost:5173", "http://localhost:5174"})
 @Tag(
         name = "Organización",
         description = "Consulta de unidades orgánicas y personal (BD Organizacion)"
@@ -48,5 +48,25 @@ public class UnidadOrganicaController {
                         nomUO
                 )
         );
+    }
+
+    @GetMapping("/unidadesOrganicas/solicitud")
+    @Operation(
+            summary = "Unidades orgánicas a las que se puede solicitar",
+            description = "Todas las unidades orgánicas para registrar un requerimiento "
+                    + "(spGR_UnidadOrganica_Consultar siTipBus=7). El código devuelto es el iCodUO."
+    )
+    public ResponseEntity<List<UnidadOrganica>> paraSolicitud() {
+        return ResponseEntity.ok(unidadOrganicaService.listarParaSolicitud());
+    }
+
+    @GetMapping("/unidadesOrganicas/{codigoUo}/dependencias")
+    @Operation(
+            summary = "Dependencias de una unidad orgánica",
+            description = "Divisiones/unidades hijas (spGR_UnidadOrganica_Consultar siTipBus=2). "
+                    + "codigoUo es el iCodUO de la unidad padre."
+    )
+    public ResponseEntity<List<UnidadOrganica>> dependencias(@PathVariable Integer codigoUo) {
+        return ResponseEntity.ok(unidadOrganicaService.buscarDependencias(codigoUo));
     }
 }
