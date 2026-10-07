@@ -32,6 +32,15 @@ export function buscarCargosAutorizados({ tipBus, codigoReq, codigoCat, codigoSu
 }
 
 /**
+ * Personas a las que ya se solicitó autorización para el requerimiento.
+ * GET /api/requerimiento/consultarSolicitud?codigoRequerimiento=
+ * Respuesta: [{ codigo, nombre, estado }]
+ */
+export function consultarSolicitud(codigoRequerimiento) {
+  return http.get('/api/requerimiento/consultarSolicitud', { codigoRequerimiento })
+}
+
+/**
  * Solicita la autorización de un requerimiento a una o más personas.
  * payload: { codRequerimiento, codPerAutoriza ('1001,1002'), codPerSolAutorizacion,
  *            codPerHelpDesk, codPerActualiza, observacion }

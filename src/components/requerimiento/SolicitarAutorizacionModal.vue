@@ -1,8 +1,9 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { normalizarTexto, usePersonasCatalogo } from '../../controllers/usePersonasCatalogo'
 import { solicitarAutorizacion } from '../../services/requerimientoService'
 import { cargarCargosAutorizados } from '../../models/cargo'
+import { cargarSolicitudesAutorizacion } from '../../models/solicitudAutorizacion'
 import Icon from '../Icon.vue'
 
 // -------------------------------------------------------------------------
@@ -82,8 +83,56 @@ watch(parametrosCargos, () => {
   if (props.visible) cargarCargos()
 })
 
-// Cada vez que se abre el modal: limpia el formulario y pide el catálogo.
-// Si ya está en memoria, cargarCatalogoPersonas() no vuelve a llamar al endpoint.
+// -------------------------------------------------------------------------
+// Selección inicial: personas a las que ya se solicitó autorización
+// (GET /api/requerimiento/consultarSolicitud). Cada "codigo" de la respuesta se
+// busca como codigoPersona en personasCatalogo y se agrega ese objeto completo
+// a autorizadoresSeleccionados.
+const consultandoSolicitudes = ref(false)
+const errorSolicitudes = ref('')
+let consultaSolicitudesActual = 0
+
+async function cargarSeleccionInicial() {
+  const consulta = ++consultaSolicitudesActual
+  errorSolicitudes.value = ''
+  if (props.codigoRequerimiento == null) return
+
+  consultandoSolicitudes.value = true
+  try {
+    // El catálogo se necesita para convertir codigo -> persona completa.
+    // Si ya está en memoria, no vuelve a llamar a /api/personas.
+    const [solicitudes] = await Promise.all([
+      cargarSolicitudesAutorizacion(props.codigoRequerimiento),
+      cargarCatalogoPersonas(),
+    ])
+    if (consulta !== consultaSolicitudesActual) return // el modal se reabrió con otro requerimiento
+    if (errorPersonas.value) return // sin catálogo no se puede relacionar; ya se muestra su error
+
+    const nuevas = []
+    for (const solicitud of solicitudes) {
+      const persona = personasCatalogo.value.find((p) => claveAutorizador(p) === solicitud.codigo)
+      if (!persona) {
+        console.warn('No se encontró en personasCatalogo la persona de la autorización:', solicitud.codigo)
+        continue
+      }
+      if (!estaSeleccionadoAutorizador(persona) && !nuevas.some((p) => claveAutorizador(p) === solicitud.codigo)) {
+        nuevas.push(persona)
+      }
+    }
+    autorizadoresSeleccionados.value = [...autorizadoresSeleccionados.value, ...nuevas]
+  } catch (error) {
+    console.error('No se pudieron consultar las autorizaciones del requerimiento.', error)
+    if (consulta === consultaSolicitudesActual) {
+      errorSolicitudes.value = 'No se pudieron consultar las autorizaciones ya registradas. Puedes seleccionar las personas manualmente.'
+    }
+  } finally {
+    if (consulta === consultaSolicitudesActual) consultandoSolicitudes.value = false
+  }
+}
+
+// Cada vez que se abre el modal: limpia el formulario, pide el catálogo y
+// reconstruye la selección con las autorizaciones ya registradas.
+// Si el catálogo ya está en memoria, cargarCatalogoPersonas() no vuelve a llamar al endpoint.
 function inicializarModal() {
   motivoAutorizacion.value = ''
   autorizadoresSeleccionados.value = []
@@ -91,6 +140,7 @@ function inicializarModal() {
   errorAutorizacion.value = ''
   cargarCatalogoPersonas()
   cargarCargos()
+  cargarSeleccionInicial()
 }
 
 watch(() => props.visible, (abierto) => {
@@ -126,10 +176,19 @@ const personasFiltradas = computed(() => {
   const texto = normalizarTexto(autorizadorTexto.value.trim())
   if (!texto) return personasCatalogo.value
   return personasCatalogo.value.filter((p) =>
-    normalizarTexto(p.nombre).includes(texto) ||
-    normalizarTexto(p.cargo).includes(texto) ||
-    normalizarTexto(p.unidadOrganica).includes(texto)
+    normalizarTexto(p.nombre).includes(texto) 
   )
+})
+
+//|| normalizarTexto(p.cargo).includes(texto) ||
+//    normalizarTexto(p.unidadOrganica).includes(texto)
+
+// Al cambiar la búsqueda, la grilla de personas vuelve arriba para que el
+// primer resultado quede visible (el scroll lo tiene .autorizadores-grilla).
+const grillaPersonas = ref(null)
+watch(autorizadorTexto, async () => {
+  await nextTick()
+  if (grillaPersonas.value) grillaPersonas.value.scrollTop = 0
 })
 
 const puedeEnviarAutorizacion = computed(() =>
@@ -154,9 +213,9 @@ async function enviarSolicitudAutorizacion() {
     await solicitarAutorizacion({
       codRequerimiento: payload.codigoRequerimiento,
       codPerAutoriza: payload.codigosPersonaAutoriza.join(','),
-      codPerSolAutorizacion: payload.codigoPersonaSolicita != null ? String(payload.codigoPersonaSolicita) : null,
+      codPerSolAutorizacion: payload.codigoPersonaSolicita,
       codPerHelpDesk: payload.codigoPersonaSolicita,
-      codPerActualiza: payload.codigoPersonaActualizacion,
+      codPerActualiza: payload.codigoPersonaActualizacion|| '1001' ,
       observacion: payload.motivo,
     })
     emit('solicitudPreparada', payload)
@@ -226,7 +285,9 @@ async function enviarSolicitudAutorizacion() {
               <button type="button" @click="alternarAutorizador(p)" aria-label="Quitar persona"><Icon name="x" :size="10" /></button>
             </span>
           </div>
-          <p v-else class="form-hint">Aún no has seleccionado personas.</p>
+          <p v-else-if="!consultandoSolicitudes" class="form-hint">Aún no has seleccionado personas.</p>
+          <p v-if="consultandoSolicitudes" class="form-hint">Consultando autorizaciones...</p>
+          <p v-if="errorSolicitudes" class="conn-status conn-status--offline">⚠ {{ errorSolicitudes }}</p>
         </div>
 
         <span class="autorizadores-subtitulo">Buscar persona</span>
@@ -234,7 +295,7 @@ async function enviarSolicitudAutorizacion() {
           <Icon name="search" :size="15" />
           <input
             v-model="autorizadorTexto"
-            :placeholder="cargandoPersonas ? 'Cargando personas...' : 'Nombre, cargo o unidad...'"
+            :placeholder="cargandoPersonas ? 'Cargando personas...' : 'Nombre Personas...'"
             :disabled="cargandoPersonas"
             autocomplete="off"
           >
@@ -245,7 +306,7 @@ async function enviarSolicitudAutorizacion() {
           ⚠ No se pudo cargar el catálogo de personas: {{ errorPersonas }}
           <button type="button" @click="cargarCatalogoPersonas">Reintentar</button>
         </p>
-        <div v-else-if="personasFiltradas.length" class="autorizadores-grilla">
+        <div v-else-if="personasFiltradas.length" ref="grillaPersonas" class="autorizadores-grilla">
           <table>
             <thead>
               <tr>
@@ -258,7 +319,7 @@ async function enviarSolicitudAutorizacion() {
             <tbody>
               <tr
                 v-for="p in personasFiltradas"
-                :key="claveAutorizador(p)"
+                :key="`${claveAutorizador(p)}-${p.codigoUo}`"
                 :class="{ seleccionada: estaSeleccionadoAutorizador(p) }"
                 @click="alternarAutorizador(p)"
               >
