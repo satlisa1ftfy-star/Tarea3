@@ -57,10 +57,10 @@ public class AuthController {
         // automáticamente en la respuesta HTTP correspondiente.
         UsuarioSesion usuarioSesion =
                 seguridadService.login(usuarioWindows);
-
+        System.out.println("usuarioWindows: " + usuarioWindows);
         String token =
                 jwtTokenUtil.generateToken(usuarioSesion.getUsuarioWindows());
-
+        System.out.println("Token: " + token);
         return ResponseEntity.ok(
                 Map.of(
                         "token", token,
