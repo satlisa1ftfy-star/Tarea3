@@ -14,7 +14,7 @@ export function useAuthController() {
   const errorMessage = ref('')
   // Datos devueltos por el backend al iniciar sesión
   const perfil = ref(null)
-
+/*
   if (import.meta.env.DEV) {
       isAuthenticated.value = true
       perfil.value = {
@@ -23,7 +23,7 @@ export function useAuthController() {
           usuarioWindows: 'jhperez'
       }
   }
-
+*/
   async function login() {
     submitted.value = true
     errorMessage.value = ''
