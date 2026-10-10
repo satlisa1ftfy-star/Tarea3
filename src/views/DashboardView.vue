@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ESTADO, buscarAvanzado, cargarPendientes, cargarTablero } from '../models/dashboard'
 import { listarRoles } from '../services/seguridadService'
 import { listarPersonas } from '../services/personaService'
@@ -260,10 +260,12 @@ function irAPendientes() {
 function seleccionarRequerimiento(card, column) {
   selectedRequest.value = card
   selectedColumn.value = column
+  menuAutorizacionesAbierto.value = false
   mensajeAutorizacion.value = ''
 }
 
 function cerrarDetalle() {
+  menuAutorizacionesAbierto.value = false
   selectedRequest.value = null
   selectedColumn.value = null
 }
@@ -513,16 +515,65 @@ async function confirmarAsignacion() {
 }
 
 // -------------------------------------------------------------------------
-// Solicitar autorización: la lógica del modal vive en
+// Autorizaciones: la lógica del modal vive en
 // components/requerimiento/SolicitarAutorizacionModal.vue. Aquí solo se
-// controla si está abierto y el mensaje que se muestra en el panel de detalle.
+// controla el menú "Autorizaciones", el modo con que se abre el modal
+// ('solicitar' | 'consultar' | 'anular') y el mensaje del panel de detalle.
 const mostrarModalAutorizacion = ref(false)
+const modoAutorizacion = ref('solicitar')
 const mensajeAutorizacion = ref('')
 
-function abrirModalAutorizacion() {
+function abrirModalAutorizacion(modo = 'solicitar') {
   mensajeAutorizacion.value = ''
+  modoAutorizacion.value = modo
   mostrarModalAutorizacion.value = true
 }
+
+// Menú desplegable: se cierra al elegir una opción, al hacer clic fuera y con Escape.
+const menuAutorizacionesAbierto = ref(false)
+const menuAutorizacionesRef = ref(null)
+const botonAutorizacionesRef = ref(null)
+
+async function alternarMenuAutorizaciones() {
+  menuAutorizacionesAbierto.value = !menuAutorizacionesAbierto.value
+  if (menuAutorizacionesAbierto.value) {
+    await nextTick()
+    menuAutorizacionesRef.value?.querySelector('[role="menuitem"]')?.focus()
+  }
+}
+
+function cerrarMenuAutorizaciones(devolverFoco = false) {
+  menuAutorizacionesAbierto.value = false
+  if (devolverFoco) botonAutorizacionesRef.value?.focus()
+}
+
+function elegirAccionAutorizacion(modo) {
+  cerrarMenuAutorizaciones()
+  abrirModalAutorizacion(modo)
+}
+
+// Teclado: flechas para moverse entre opciones, Escape para cerrar.
+function alTeclaMenuAutorizaciones(event) {
+  if (!menuAutorizacionesAbierto.value) return
+  const opciones = [...(menuAutorizacionesRef.value?.querySelectorAll('[role="menuitem"]') || [])]
+  const actual = opciones.indexOf(document.activeElement)
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    cerrarMenuAutorizaciones(true)
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    const paso = event.key === 'ArrowDown' ? 1 : -1
+    opciones[(actual + paso + opciones.length) % opciones.length]?.focus()
+  }
+}
+
+function alClicFueraMenuAutorizaciones(event) {
+  if (!menuAutorizacionesAbierto.value) return
+  const contenedor = menuAutorizacionesRef.value // botón + lista de opciones
+  if (contenedor && !contenedor.contains(event.target)) cerrarMenuAutorizaciones()
+}
+onMounted(() => document.addEventListener('pointerdown', alClicFueraMenuAutorizaciones))
+onBeforeUnmount(() => document.removeEventListener('pointerdown', alClicFueraMenuAutorizaciones))
 
 function cerrarModalAutorizacion() {
   mostrarModalAutorizacion.value = false
@@ -969,7 +1020,36 @@ onMounted(() => {
       <div class="detail-actions">
         <button class="move"><Icon name="move" :size="14" /> Mover de estado</button>
         <button v-if="puedeAsignar" class="asignar" @click="abrirModalAsignar"><Icon name="user-plus" :size="14" /> Asignar</button>
-        <button @click="abrirModalAutorizacion"><Icon name="shield" :size="14" /> Solicitar autorización</button>
+        <!-- Botón dividido de autorizaciones: la zona principal abre directamente
+             "Solicitar autorización"; la flecha despliega Solicitar / Consultar / Anular
+             (todas abren el mismo modal en distinto modo). -->
+        <div ref="menuAutorizacionesRef" class="menu-autorizaciones" @keydown="alTeclaMenuAutorizaciones">
+          <div class="menu-autorizaciones-grupo">
+            <button type="button" class="menu-autorizaciones-principal" @click="elegirAccionAutorizacion('solicitar')">
+              <Icon name="shield" :size="14" /> Solicitar autorización
+            </button>
+            <button
+              ref="botonAutorizacionesRef"
+              type="button"
+              class="menu-autorizaciones-toggle"
+              aria-label="Más acciones de autorización"
+              aria-haspopup="menu"
+              :aria-expanded="menuAutorizacionesAbierto"
+              @click="alternarMenuAutorizaciones"
+            >
+              <Icon :name="menuAutorizacionesAbierto ? 'chevron-up' : 'chevron-down'" :size="13" />
+            </button>
+          </div>
+          <div v-if="menuAutorizacionesAbierto" class="menu-autorizaciones-lista" role="menu" aria-label="Autorizaciones">
+            <button type="button" role="menuitem" @click="elegirAccionAutorizacion('solicitar')">
+              <Icon name="shield" :size="14" /> Solicitar autorización
+            </button>
+            <div class="menu-autorizaciones-separador" role="separator"></div>
+            <button type="button" role="menuitem" class="menu-autorizaciones-anular" @click="elegirAccionAutorizacion('anular')">
+              <Icon name="x" :size="14" /> Anular autorizaciones…
+            </button>
+          </div>
+        </div>
         <template v-if="puedeDarConformidad">
           <button class="conformidad-si"><Icon name="check" :size="14" /> Dar conformidad</button>
           <button class="conformidad-no"><Icon name="x" :size="14" /> Dar no conformidad</button>
@@ -1144,6 +1224,7 @@ onMounted(() => {
     <!-- Modal Solicitar autorización -->
     <SolicitarAutorizacionModal
       :visible="mostrarModalAutorizacion"
+      :modo="modoAutorizacion"
       :perfil="perfil"
       :requerimiento="selectedRequest"
       :estado="selectedColumn?.title"

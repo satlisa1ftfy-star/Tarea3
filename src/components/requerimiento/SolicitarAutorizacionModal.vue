@@ -1,20 +1,25 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { normalizarTexto, usePersonasCatalogo } from '../../controllers/usePersonasCatalogo'
+import { computed, ref, watch } from 'vue'
+import { usePersonasCatalogo } from '../../controllers/usePersonasCatalogo'
 import { solicitarAutorizacion } from '../../services/requerimientoService'
 import { cargarCargosAutorizados } from '../../models/cargo'
 import { cargarSolicitudesAutorizacion } from '../../models/solicitudAutorizacion'
 import Icon from '../Icon.vue'
+import SeleccionarPersonasModal from '../persona/SeleccionarPersonasModal.vue'
 
 // -------------------------------------------------------------------------
-// Solicitar autorización: modal con Motivo (obligatorio) y selección múltiple
-// de personas que autorizan. Las personas salen del catálogo en memoria
-// (GET /api/personas?vigencia=1, descargado una sola vez) y se buscan en memoria
-// con un buscador general y filtros por columna. La solicitud se envía a
-// POST /api/requerimiento/solicitar.
+// Modal de autorizaciones del requerimiento. Según "modo" (lo elige el menú
+// "Autorizaciones" del detalle):
+//   'solicitar' -> formulario de solicitud (POST /api/requerimiento/solicitar).
+//                  La búsqueda de personas se abre en un segundo modal
+//                  (SeleccionarPersonasModal) superpuesto a este formulario.
+//   'consultar' -> solicitudes registradas (GET /api/requerimiento/consultarSolicitud).
+//   'anular'    -> motivo y confirmación de anulación. El backend no expone
+//                  todavía una operación para anular (ver ANULACION_DISPONIBLE).
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
+  modo: { type: String, default: 'solicitar' },           // 'solicitar' | 'consultar' | 'anular'
   perfil: { type: Object, default: null },
   requerimiento: { type: Array, default: null },          // tarjeta seleccionada (selectedRequest)
   estado: { type: String, default: '' },                  // título de la columna (selectedColumn.title)
@@ -23,18 +28,29 @@ const props = defineProps({
 })
 const emit = defineEmits(['cerrar', 'solicitudPreparada'])
 
-const LARGO_MAXIMO_OBSERVACION = 2000 // Nota del sistema antiguo: máx. 2000 caracteres
+const LARGO_MAXIMO_OBSERVACION = 2000 // Nota del sistema antiguo: máx. 2000 caracteres (vObservacion_ReqMov)
+
+// El SP dbo.spGR_Requerimiento_RegistrarPersonaAutorizacion ya anula con siTipBus = 3
+// (recibe vCodPerAutorizacion y vObservacion_ReqMov), pero service-requerimiento no
+// expone ningún endpoint que lo invoque: /solicitar envía siempre 1 y /autorizar 2.
+// Cuando exista el endpoint, agregar su función en requerimientoService.js, llamarla
+// en confirmarAnulacion() y cambiar esta constante a true.
+const ANULACION_DISPONIBLE = false
+
+const TITULOS = {
+  solicitar: 'Solicitar autorización',
+  anular: 'Anular autorizaciones',
+}
+const titulo = computed(() => TITULOS[props.modo] || TITULOS.solicitar)
 
 // personasCatalogo: todas las personas vigentes (compartido, se descarga una sola vez).
-const { personasCatalogo, cargandoPersonas, errorPersonas, cargarCatalogoPersonas } = usePersonasCatalogo()
+// Aquí se usa para convertir los códigos de consultarSolicitud en personas completas;
+// la búsqueda la hace SeleccionarPersonasModal sobre el mismo catálogo.
+const { personasCatalogo, errorPersonas, cargarCatalogoPersonas } = usePersonasCatalogo()
 
 const motivoAutorizacion = ref('')
-const autorizadoresSeleccionados = ref([])
-const autorizadorTexto = ref('')  // buscador principal (nombre OR cargo OR unidad)
-const filtroPersona = ref('')     // filtro de la columna Persona (solo nombre)
-const filtroCargo = ref('')       // filtro de la columna Cargo (solo cargo)
-const filtroUnidad = ref('')      // filtro de la columna Unidad (solo unidadOrganica)
-const mostrarResultados = ref(false) // visibilidad de la grilla temporal de resultados
+const autorizadoresSeleccionados = ref([]) // selección real; v-model de SeleccionarPersonasModal
+const mostrarModalBuscarPersonas = ref(false)
 const enviandoAutorizacion = ref(false)
 const errorAutorizacion = ref('')
 
@@ -85,7 +101,7 @@ async function cargarCargos() {
 // Si cambia el requerimiento con el modal abierto, se consultan sus cargos
 // (cargarCargosAutorizados reutiliza lo ya consultado con los mismos parámetros).
 watch(parametrosCargos, () => {
-  if (props.visible) cargarCargos()
+  if (props.visible && props.modo === 'solicitar') cargarCargos()
 })
 
 // -------------------------------------------------------------------------
@@ -135,21 +151,87 @@ async function cargarSeleccionInicial() {
   }
 }
 
-// Cada vez que se abre el modal: limpia el formulario, pide el catálogo y
-// reconstruye la selección con las autorizaciones ya registradas.
+// -------------------------------------------------------------------------
+// Consultar / Anular: muestran tal cual lo que devuelve consultarSolicitud
+// ({ codigo, nombre, estado }), sin necesitar el catálogo de personas.
+// La descripción original de la solicitud NO viene en esa respuesta: el SP
+// spGR_Requerimiento_ConsultarPersonaAutorizacion (siTipBus = 1) solo devuelve
+// código, nombres, estado y fechas; el motivo se guarda en
+// GRMovRequerimiento.vObservacion_ReqMov, que ninguna consulta expone.
+const solicitudesRegistradas = ref([])
+const cargandoRegistradas = ref(false)
+const errorRegistradas = ref('')
+let consultaRegistradasActual = 0
+
+async function cargarSolicitudesRegistradas() {
+  const consulta = ++consultaRegistradasActual
+  solicitudesRegistradas.value = []
+  errorRegistradas.value = ''
+  if (props.codigoRequerimiento == null) {
+    errorRegistradas.value = 'No se pudo identificar el requerimiento seleccionado.'
+    return
+  }
+  cargandoRegistradas.value = true
+  try {
+    const solicitudes = await cargarSolicitudesAutorizacion(props.codigoRequerimiento)
+    if (consulta === consultaRegistradasActual) solicitudesRegistradas.value = solicitudes
+  } catch (error) {
+    console.error('No se pudo consultar la solicitud de autorización.', error)
+    if (consulta === consultaRegistradasActual) {
+      errorRegistradas.value = 'No se pudo consultar la solicitud de autorización. Inténtalo nuevamente.'
+    }
+  } finally {
+    if (consulta === consultaRegistradasActual) cargandoRegistradas.value = false
+  }
+}
+
+// Anulación: motivo propio (distinto de la descripción original de la solicitud)
+// y confirmación explícita; no se ejecuta al elegir la opción del menú.
+const motivoAnulacion = ref('')
+const confirmacionAnulacion = ref(false)
+const procesandoAnulacion = ref(false)
+const errorAnulacion = ref('')
+
+const puedeAnular = computed(() =>
+  ANULACION_DISPONIBLE &&
+  solicitudesRegistradas.value.length > 0 &&
+  motivoAnulacion.value.trim().length > 0 &&
+  confirmacionAnulacion.value &&
+  !procesandoAnulacion.value
+)
+
+function confirmarAnulacion() {
+  errorAnulacion.value = ''
+  if (!ANULACION_DISPONIBLE) {
+    errorAnulacion.value = 'La anulación no está disponible: el backend no expone esta operación. No se envió ningún cambio.'
+    return
+  }
+  // Pendiente del endpoint de anulación (ver ANULACION_DISPONIBLE).
+}
+
+// -------------------------------------------------------------------------
+// Apertura del modal: cada modo carga solo lo que necesita.
 // Si el catálogo ya está en memoria, cargarCatalogoPersonas() no vuelve a llamar al endpoint.
 function inicializarModal() {
-  motivoAutorizacion.value = ''
-  autorizadoresSeleccionados.value = []
-  limpiarFiltros() // también oculta los resultados
+  mostrarModalBuscarPersonas.value = false
   errorAutorizacion.value = ''
-  cargarCatalogoPersonas()
-  cargarCargos()
-  cargarSeleccionInicial()
+  motivoAnulacion.value = ''
+  confirmacionAnulacion.value = false
+  errorAnulacion.value = ''
+  if (props.modo === 'solicitar') {
+    motivoAutorizacion.value = ''
+    autorizadoresSeleccionados.value = []
+    cargarCatalogoPersonas()
+    cargarCargos()
+    cargarSeleccionInicial()
+  } else {
+    cargarSolicitudesRegistradas()
+  }
 }
 
 watch(() => props.visible, (abierto) => {
   if (abierto) inicializarModal()
+  else mostrarModalBuscarPersonas.value = false
 }, { immediate: true })
 
 function cerrarModalAutorizacion() {
@@ -164,113 +246,15 @@ function estaSeleccionadoAutorizador(persona) {
   return autorizadoresSeleccionados.value.some((p) => claveAutorizador(p) === claveAutorizador(persona))
 }
 
-function alternarAutorizador(persona) {
-  if (estaSeleccionadoAutorizador(persona)) {
-    autorizadoresSeleccionados.value = autorizadoresSeleccionados.value.filter(
-      (p) => claveAutorizador(p) !== claveAutorizador(persona)
-    )
-  } else {
-    autorizadoresSeleccionados.value = [...autorizadoresSeleccionados.value, persona]
-  }
+// Segundo modal de búsqueda: se abre encima del formulario, que sigue abierto
+// detrás. Cerrarlo no reinicia nada (selección, motivo y cargos se conservan).
+function abrirBuscarPersonas() {
+  mostrarModalBuscarPersonas.value = true
 }
 
-// -------------------------------------------------------------------------
-// Dos conceptos separados:
-//   autorizadoresSeleccionados -> selección real (grilla "Personas seleccionadas")
-//   personasFiltradas          -> resultados temporales de búsqueda (+ Agregar)
-// Solo agregarAutorizador / quitarAutorizador modifican la selección.
-
-function agregarAutorizador(persona) {
-  if (!estaSeleccionadoAutorizador(persona)) alternarAutorizador(persona)
+function cerrarBuscarPersonas() {
+  mostrarModalBuscarPersonas.value = false
 }
-
-function quitarAutorizador(persona) {
-  if (estaSeleccionadoAutorizador(persona)) alternarAutorizador(persona)
-}
-
-// Búsqueda en memoria sobre personasCatalogo (sin llamadas HTTP), ignorando
-// mayúsculas y tildes con normalizarTexto:
-//   (principal en nombre OR cargo OR unidad) AND persona AND cargo AND unidad
-// Sin texto en el buscador principal no hay resultados (no se muestra el catálogo).
-// Excluye a las personas ya seleccionadas.
-const personasFiltradas = computed(() => {
-  const general = normalizarTexto(autorizadorTexto.value.trim())
-  if (!general) return []
-  const persona = normalizarTexto(filtroPersona.value.trim())
-  const cargo = normalizarTexto(filtroCargo.value.trim())
-  const unidad = normalizarTexto(filtroUnidad.value.trim())
-
-  return personasCatalogo.value.filter((p) => {
-    if (estaSeleccionadoAutorizador(p)) return false
-    const nombreP = normalizarTexto(p.nombre)
-    const cargoP = normalizarTexto(p.cargo)
-    const unidadP = normalizarTexto(p.unidadOrganica)
-    if (!(nombreP.includes(general) || cargoP.includes(general) || unidadP.includes(general))) return false
-    if (persona && !nombreP.includes(persona)) return false
-    if (cargo && !cargoP.includes(cargo)) return false
-    if (unidad && !unidadP.includes(unidad)) return false
-    return true
-  })
-})
-
-// Filtros por columna activos (indicador dentro de la zona de resultados).
-const filtrosActivos = computed(() => [
-  { etiqueta: 'Persona', valor: filtroPersona.value.trim() },
-  { etiqueta: 'Cargo', valor: filtroCargo.value.trim() },
-  { etiqueta: 'Unidad', valor: filtroUnidad.value.trim() },
-].filter((f) => f.valor))
-
-const hayBusqueda = computed(() => autorizadorTexto.value.trim().length > 0)
-
-// Limpia la búsqueda y oculta los resultados; no modifica autorizadoresSeleccionados.
-function limpiarFiltros() {
-  autorizadorTexto.value = ''
-  filtroPersona.value = ''
-  filtroCargo.value = ''
-  filtroUnidad.value = ''
-  mostrarResultados.value = false
-}
-
-// -------------------------------------------------------------------------
-// Zona de búsqueda (input principal + grilla de resultados + botones Agregar):
-// los resultados se ocultan solo cuando se hace clic o se enfoca algo fuera de
-// esa zona. No se usa @blur, que los ocultaría antes de procesar "+ Agregar".
-const zonaBusquedaRef = ref(null)
-const desplegarResultados = computed(() => mostrarResultados.value && hayBusqueda.value)
-
-function alInteractuarFuera(event) {
-  if (zonaBusquedaRef.value && !zonaBusquedaRef.value.contains(event.target)) {
-    mostrarResultados.value = false
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('pointerdown', alInteractuarFuera)
-  document.addEventListener('focusin', alInteractuarFuera)
-})
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', alInteractuarFuera)
-  document.removeEventListener('focusin', alInteractuarFuera)
-})
-
-// Cambiar el buscador principal inicia una nueva búsqueda general: limpia los
-// filtros por columna (incluso al dejarlo vacío). Solo reacciona a cambios reales
-// de contenido (no al foco/clic) y no genera ciclos: este watch solo escribe los
-// filtros, y nada que observe los filtros escribe autorizadorTexto.
-// No toca autorizadoresSeleccionados.
-watch(autorizadorTexto, () => {
-  filtroPersona.value = ''
-  filtroCargo.value = ''
-  filtroUnidad.value = ''
-})
-
-// Al cambiar la búsqueda: se muestran los resultados y su grilla vuelve arriba.
-const personasGrillaRef = ref(null)
-watch([autorizadorTexto, filtroPersona, filtroCargo, filtroUnidad], async () => {
-  if (hayBusqueda.value) mostrarResultados.value = true
-  await nextTick()
-  if (personasGrillaRef.value) personasGrillaRef.value.scrollTop = 0
-})
 
 const puedeEnviarAutorizacion = computed(() =>
   motivoAutorizacion.value.trim().length > 0 && autorizadoresSeleccionados.value.length > 0
@@ -310,11 +294,10 @@ async function enviarSolicitudAutorizacion() {
 </script>
 
 <template>
-  <!-- Modal Solicitar autorización: Motivo obligatorio + selección múltiple de autorizadores -->
   <div v-if="visible" class="modal-overlay" @click.self="cerrarModalAutorizacion">
     <div class="modal-box modal-box--ancho">
       <button class="close-detail modal-close" aria-label="Cerrar" @click="cerrarModalAutorizacion"><Icon name="x" :size="18" /></button>
-      <h2>Solicitar autorización</h2>
+      <h2>{{ titulo }}</h2>
 
       <div class="modal-grid-2">
         <div class="form-field">
@@ -322,164 +305,184 @@ async function enviarSolicitudAutorizacion() {
           <input :value="requerimiento?.[0]" disabled>
         </div>
         <div class="form-field">
-          <label>Estado</label>
+          <label>Estado del requerimiento</label>
           <input :value="estado" disabled>
         </div>
       </div>
 
-      <!-- Cargos autorizados: solo informativo (sin buscador ni selección) -->
-      <div class="form-field">
-        <label>Cargos autorizados</label>
-        <p v-if="cargandoCargos" class="form-hint">Cargando cargos autorizados...</p>
-        <p v-else-if="errorCargos" class="conn-status conn-status--offline">⚠ {{ errorCargos }}</p>
-        <p v-else-if="faltanDatosCargos" class="form-hint">No se pueden consultar los cargos: el requerimiento no tiene categoría o subcategoría.</p>
-        <p v-else-if="!cargosAutorizados.length" class="form-hint">No existen cargos autorizados para este requerimiento.</p>
-        <div v-else class="autorizadores-grilla cargos-grilla">
-          <table>
-            <thead>
-              <tr>
-                <th class="col-codigo">Código</th>
-                <th>Cargo</th>
-                <th class="col-aprob">Aprob</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="cargo in cargosAutorizados" :key="cargo.codigoCargo">
-                <td class="col-codigo">{{ cargo.codigoCargo }}</td>
-                <td>{{ cargo.nombreCargo }}</td>
-                <td class="col-aprob">{{ cargo.tipAprob || '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="form-field">
-        <label>Personas que autorizan *</label>
-
-        <p v-if="consultandoSolicitudes" class="form-hint">Consultando autorizaciones...</p>
-        <p v-if="errorSolicitudes" class="conn-status conn-status--offline">⚠ {{ errorSolicitudes }}</p>
-        <!-- PERSONAS SELECCIONADAS: única grilla que representa la selección real -->
-        <section class="zona-seleccionados">
-          <header class="zona-titulo">
-            <span><Icon name="user-plus" :size="14" /> Personas seleccionadas</span>
-            <b>{{ autorizadoresSeleccionados.length }} {{ autorizadoresSeleccionados.length === 1 ? 'persona seleccionada' : 'personas seleccionadas' }}</b>
-          </header>
-          <div v-if="autorizadoresSeleccionados.length" class="autorizadores-grilla seleccionados-grilla">
+      <!-- ===================== MODO SOLICITAR ===================== -->
+      <template v-if="modo === 'solicitar'">
+        <!-- Cargos autorizados: solo informativo (sin buscador ni selección) -->
+        <div class="form-field">
+          <label>Cargos autorizados</label>
+          <p v-if="cargandoCargos" class="form-hint">Cargando cargos autorizados...</p>
+          <p v-else-if="errorCargos" class="conn-status conn-status--offline">⚠ {{ errorCargos }}</p>
+          <p v-else-if="faltanDatosCargos" class="form-hint">No se pueden consultar los cargos: el requerimiento no tiene categoría o subcategoría.</p>
+          <p v-else-if="!cargosAutorizados.length" class="form-hint">No existen cargos autorizados para este requerimiento.</p>
+          <div v-else class="autorizadores-grilla cargos-grilla">
             <table>
               <thead>
-                <tr><th>Persona</th><th>Cargo</th><th>Unidad</th><th class="col-accion">Acción</th></tr>
+                <tr>
+                  <th class="col-codigo">Código</th>
+                  <th>Cargo</th>
+                  <th class="col-aprob">Aprob</th>
+                </tr>
               </thead>
               <tbody>
-                <tr v-for="p in autorizadoresSeleccionados" :key="claveAutorizador(p)">
-                  <td>{{ p.nombre }}</td>
-                  <td>{{ p.cargo || '—' }}</td>
-                  <td>{{ p.unidadOrganica || '—' }}</td>
-                  <td class="col-accion">
-                    <button type="button" class="btn-quitar" @click="quitarAutorizador(p)"><Icon name="x" :size="12" /> Quitar</button>
-                  </td>
+                <tr v-for="cargo in cargosAutorizados" :key="cargo.codigoCargo">
+                  <td class="col-codigo">{{ cargo.codigoCargo }}</td>
+                  <td>{{ cargo.nombreCargo }}</td>
+                  <td class="col-aprob">{{ cargo.tipAprob || '—' }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p v-else-if="!consultandoSolicitudes" class="form-hint">Aún no has seleccionado personas. Búscalas abajo y pulsa "+ Agregar".</p>
-        </section>
+        </div>
 
-        <!-- BUSCAR PERSONAS: zona temporal (input + resultados + botones Agregar) -->
-        <section ref="zonaBusquedaRef" class="zona-busqueda">
-          <header class="zona-titulo">
-            <span><Icon name="search" :size="14" /> Buscar personas</span>
-            <button type="button" class="limpiar-filtros" :disabled="!hayBusqueda && !filtrosActivos.length" @click="limpiarFiltros">
-              <Icon name="x" :size="12" /> Limpiar búsqueda
-            </button>
-          </header>
-          <label class="autorizadores-buscador">
-            <Icon name="search" :size="15" />
-            <input
-              v-model="autorizadorTexto"
-              :placeholder="cargandoPersonas ? 'Cargando personas...' : 'Buscar por persona, cargo o unidad...'"
-              :disabled="cargandoPersonas"
-              autocomplete="off"
-              @focus="mostrarResultados = true"
-              @click="mostrarResultados = true"
-            >
-          </label>
-
-          <p v-if="cargandoPersonas" class="form-hint">Cargando personas...</p>
-          <p v-else-if="errorPersonas" class="conn-status conn-status--offline">
-            ⚠ No se pudo cargar el catálogo de personas: {{ errorPersonas }}
-            <button type="button" @click="cargarCatalogoPersonas">Reintentar</button>
-          </p>
-          <div v-else-if="desplegarResultados" class="zona-resultados">
-            <div class="autorizadores-resumen">
-              <span>Resultados de búsqueda · Resultados encontrados: <strong>{{ personasFiltradas.length }}</strong></span>
-            </div>
-            <div v-if="filtrosActivos.length" class="autorizadores-filtros-activos">
-              <span class="autorizadores-subtitulo">Filtros activos:</span>
-              <span v-for="f in filtrosActivos" :key="f.etiqueta" class="filtro-chip">{{ f.etiqueta }}: {{ f.valor }}</span>
-            </div>
-
-            <!-- La cabecera con los filtros siempre se dibuja (aunque no haya resultados) para no perder el foco -->
-            <div ref="personasGrillaRef" class="autorizadores-grilla personas-grilla">
+        <!-- Personas autorizadoras seleccionadas (se gestionan en el segundo modal) -->
+        <div class="form-field">
+          <label>Personas que autorizan *</label>
+          <section class="zona-seleccionados">
+            <header class="zona-titulo">
+              <span><Icon name="user-plus" :size="14" /> Personas seleccionadas</span>
+              <b>{{ autorizadoresSeleccionados.length }} {{ autorizadoresSeleccionados.length === 1 ? 'persona seleccionada' : 'personas seleccionadas' }}</b>
+            </header>
+            <p v-if="consultandoSolicitudes" class="form-hint">Consultando autorizaciones...</p>
+            <p v-if="errorSolicitudes" class="conn-status conn-status--offline">⚠ {{ errorSolicitudes }}</p>
+            <div v-if="autorizadoresSeleccionados.length" class="autorizadores-grilla seleccionados-grilla">
               <table>
                 <thead>
-                  <tr>
-                    <th>Persona</th>
-                    <th>Cargo</th>
-                    <th>Unidad</th>
-                    <th class="col-accion">Acción</th>
-                  </tr>
-                  <tr class="fila-filtros">
-                    <th><label class="filtro-columna"><Icon name="search" :size="12" /><input v-model="filtroPersona" placeholder="Buscar persona..." autocomplete="off"></label></th>
-                    <th><label class="filtro-columna"><Icon name="search" :size="12" /><input v-model="filtroCargo" placeholder="Buscar cargo..." autocomplete="off"></label></th>
-                    <th><label class="filtro-columna"><Icon name="search" :size="12" /><input v-model="filtroUnidad" placeholder="Buscar unidad..." autocomplete="off"></label></th>
-                    <th class="col-accion"></th>
-                  </tr>
+                  <tr><th>Persona</th><th>Cargo</th><th>Unidad</th></tr>
                 </thead>
                 <tbody>
-                  <!-- Una persona puede figurar en dos U.O. con el mismo codigoPersona: la key combina ambos -->
-                  <tr v-for="p in personasFiltradas" :key="`${claveAutorizador(p)}-${p.codigoUo}`">
+                  <tr v-for="p in autorizadoresSeleccionados" :key="claveAutorizador(p)">
                     <td>{{ p.nombre }}</td>
                     <td>{{ p.cargo || '—' }}</td>
                     <td>{{ p.unidadOrganica || '—' }}</td>
-                    <td class="col-accion">
-                      <button type="button" class="btn-agregar" @click="agregarAutorizador(p)"><Icon name="plus" :size="12" /> Agregar</button>
-                    </td>
-                  </tr>
-                  <tr v-if="!personasFiltradas.length" class="fila-vacia">
-                    <td colspan="4">No se encontraron personas para agregar.</td>
                   </tr>
                 </tbody>
               </table>
             </div>
+            <p v-else-if="!consultandoSolicitudes" class="form-hint">Aún no has seleccionado personas.</p>
+            <button type="button" class="btn-gestionar" @click="abrirBuscarPersonas">
+              <Icon name="search" :size="14" /> Buscar o gestionar personas
+            </button>
+          </section>
+        </div>
+
+        <div class="form-field">
+          <label>Motivo *</label>
+          <textarea
+            v-model="motivoAutorizacion"
+            :maxlength="LARGO_MAXIMO_OBSERVACION"
+            rows="4"
+            placeholder="Indica el motivo de la solicitud de autorización..."
+          ></textarea>
+          <p class="form-hint">{{ motivoAutorizacion.length }}/{{ LARGO_MAXIMO_OBSERVACION }} caracteres</p>
+        </div>
+
+        <p v-if="errorAutorizacion" class="conn-status conn-status--offline">⚠ {{ errorAutorizacion }}</p>
+
+        <div class="modal-actions">
+          <button class="modal-btn-secundario" :disabled="enviandoAutorizacion" @click="cerrarModalAutorizacion">Cancelar</button>
+          <button
+            class="modal-btn-primario"
+            :disabled="!puedeEnviarAutorizacion || enviandoAutorizacion"
+            @click="enviarSolicitudAutorizacion"
+          >{{ enviandoAutorizacion ? 'Enviando...' : 'Solicitar' }}</button>
+        </div>
+      </template>
+
+      <!-- ===================== MODO CONSULTAR / ANULAR ===================== -->
+      <template v-else>
+        <!-- Descripción original de la solicitud (solo lectura) -->
+        <div v-if="modo === 'consultar'" class="form-field">
+          <label>Descripción de la solicitud</label>
+          <div class="descripcion-solicitud descripcion-solicitud--no-disponible">
+            La descripción no está disponible: el servicio de consulta de solicitudes no la devuelve.
           </div>
-          <p v-else-if="!hayBusqueda" class="form-hint">Escribe para buscar personas y agrégalas con "+ Agregar".</p>
-        </section>
-      </div>
+        </div>
 
-      <div class="form-field">
-        <label>Motivo *</label>
-        <textarea
-          v-model="motivoAutorizacion"
-          :maxlength="LARGO_MAXIMO_OBSERVACION"
-          rows="4"
-          placeholder="Indica el motivo de la solicitud de autorización..."
-        ></textarea>
-        <p class="form-hint">{{ motivoAutorizacion.length }}/{{ LARGO_MAXIMO_OBSERVACION }} caracteres</p>
-      </div>
+        <div class="form-field">
+          <label>Personas a las que se solicitó autorización</label>
+          <p v-if="cargandoRegistradas" class="form-hint">Consultando solicitud...</p>
+          <p v-else-if="errorRegistradas" class="conn-status conn-status--offline">
+            ⚠ {{ errorRegistradas }}
+            <button type="button" @click="cargarSolicitudesRegistradas">Reintentar</button>
+          </p>
+          <p v-else-if="!solicitudesRegistradas.length" class="form-hint aviso-info">
+            No hay solicitudes de autorización registradas para este requerimiento.
+          </p>
+          <div v-else class="autorizadores-grilla registradas-grilla">
+            <table>
+              <thead>
+                <tr><th class="col-codigo">Código</th><th>Nombre</th><th class="col-estado">Estado</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in solicitudesRegistradas" :key="s.codigo">
+                  <td class="col-codigo">{{ s.codigo }}</td>
+                  <td>{{ s.nombre }}</td>
+                  <td class="col-estado"><span class="estado-pill">{{ s.estado || '—' }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-      <p v-if="errorAutorizacion" class="conn-status conn-status--offline">⚠ {{ errorAutorizacion }}</p>
+        <!-- Anular: motivo de anulación (editable) + confirmación explícita -->
+        <template v-if="modo === 'anular' && !cargandoRegistradas && !errorRegistradas && solicitudesRegistradas.length">
+          <div class="form-field">
+            <label>Motivo de anulación *</label>
+            <textarea
+              v-model="motivoAnulacion"
+              :maxlength="LARGO_MAXIMO_OBSERVACION"
+              rows="3"
+              placeholder="Indica el motivo por el que se solicita anular esta autorización..."
+            ></textarea>
+            <p class="form-hint">{{ motivoAnulacion.length }}/{{ LARGO_MAXIMO_OBSERVACION }} caracteres</p>
+          </div>
 
-      <div class="modal-actions">
-        <button class="modal-btn-secundario" :disabled="enviandoAutorizacion" @click="cerrarModalAutorizacion">Cancelar</button>
-        <button
-          class="modal-btn-primario"
-          :disabled="!puedeEnviarAutorizacion || enviandoAutorizacion"
-          @click="enviarSolicitudAutorizacion"
-        >{{ enviandoAutorizacion ? 'Enviando...' : 'Solicitar' }}</button>
-      </div>
+          <div class="aviso-anulacion">
+            <strong>¿Anular la solicitud de autorización del requerimiento {{ requerimiento?.[0] }}?</strong>
+            <p>
+              Afectará a {{ solicitudesRegistradas.length }}
+              {{ solicitudesRegistradas.length === 1 ? 'persona' : 'personas' }} listadas arriba.
+            </p>
+            <p v-if="!ANULACION_DISPONIBLE" class="aviso-backend">
+              La anulación todavía no está disponible: service-requerimiento no expone una operación
+              para anular solicitudes de autorización. No se enviará ningún cambio.
+            </p>
+            <label class="form-checkbox">
+              <input type="checkbox" v-model="confirmacionAnulacion" :disabled="!ANULACION_DISPONIBLE">
+              Confirmo que deseo anular esta solicitud.
+            </label>
+          </div>
+          <p v-if="errorAnulacion" class="conn-status conn-status--offline">⚠ {{ errorAnulacion }}</p>
+        </template>
+
+        <div class="modal-actions">
+          <button class="modal-btn-secundario" :disabled="procesandoAnulacion" @click="cerrarModalAutorizacion">{{ modo === 'anular' ? 'Cancelar' : 'Cerrar' }}</button>
+          <button
+            v-if="modo === 'anular' && solicitudesRegistradas.length"
+            class="modal-btn-peligro"
+            :disabled="!puedeAnular"
+            :title="ANULACION_DISPONIBLE ? '' : 'No disponible: falta el endpoint de anulación en el backend'"
+            @click="confirmarAnulacion"
+          >{{ procesandoAnulacion ? 'Anulando...' : 'Anular autorizaciones' }}</button>
+        </div>
+      </template>
     </div>
   </div>
+
+  <!-- Segundo modal: búsqueda y selección de personas, encima del formulario de solicitud -->
+  <SeleccionarPersonasModal
+    v-if="visible && modo === 'solicitar' && mostrarModalBuscarPersonas"
+    v-model="autorizadoresSeleccionados"
+    titulo="Seleccionar personas autorizadoras"
+    :descripcion="`Requerimiento: ${requerimiento?.[0] || ''}`"
+    @confirmar="cerrarBuscarPersonas"
+    @cerrar="cerrarBuscarPersonas"
+  />
 </template>
 
 <style scoped>
@@ -488,39 +491,28 @@ async function enviarSolicitudAutorizacion() {
 .autorizadores-grilla th{position:sticky;top:0;z-index:1;padding:9px 10px;color:var(--muted);background:#f4f7fc;font-size:11px;font-weight:600;text-align:left;border-bottom:1px solid var(--border)}
 .autorizadores-grilla td{padding:8px 10px;color:var(--text);border-bottom:1px solid var(--border)}
 .autorizadores-grilla tbody tr:last-child td{border-bottom:0}
-.autorizadores-subtitulo{color:var(--muted);font-size:11px;font-weight:600}
 .zona-titulo{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;color:var(--text);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .zona-titulo span{display:inline-flex;align-items:center;gap:6px}
 .zona-titulo b{color:var(--blue);font-size:11.5px;font-weight:600;text-transform:none;letter-spacing:0}
 /* Selección real: bloque fijo, borde sólido azul */
 .zona-seleccionados{margin-top:4px;padding:10px;border:1.5px solid var(--blue);border-radius:12px;background:#fff}
 .seleccionados-grilla{max-height:180px;margin-top:0}
-/* Búsqueda: bloque temporal, fondo gris y borde punteado */
-.zona-busqueda{margin-top:12px;padding:10px;border:1px dashed var(--muted-2,#8393b8);border-radius:12px;background:#f6f8fc}
-.zona-resultados{margin-top:8px}
-.autorizadores-buscador{display:flex;align-items:center;gap:8px;padding:0 12px;border:1px solid var(--border);border-radius:10px;color:var(--muted);background:#fff}
-.form-field .autorizadores-buscador input{flex:1;padding:11px 0;border:0;outline:0;background:none;font-size:13px}
-.autorizadores-resumen{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted);font-size:12px}
-.autorizadores-resumen strong{color:var(--text)}
-.limpiar-filtros{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid var(--border);border-radius:20px;color:var(--blue);background:#fff;font-size:11px;font-weight:600;text-transform:none;letter-spacing:0;cursor:pointer}
-.limpiar-filtros:disabled{color:var(--muted);cursor:default;opacity:.6}
-.autorizadores-filtros-activos{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;font-size:11.5px}
-.personas-grilla{max-height:240px;overflow:auto}
-.personas-grilla table{min-width:520px}
-.personas-grilla thead{position:sticky;top:0;z-index:1}
-.personas-grilla th{position:static}
-.personas-grilla .fila-filtros th{padding:0 8px 8px}
-.filtro-columna{display:flex;align-items:center;gap:5px;padding:0 7px;border:1px solid var(--border);border-radius:7px;color:var(--muted);background:#fff}
-.form-field .filtro-columna input{width:100%;min-width:0;padding:5px 0;border:0;outline:0;background:none;font-size:11.5px;font-weight:400}
-.personas-grilla tbody tr:hover{background:#f6f8fc}
-.personas-grilla .fila-vacia td{padding:14px 10px;color:var(--muted);text-align:center}
-.col-accion{width:96px;text-align:center!important}
-.btn-agregar,.btn-quitar{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:7px;font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer}
-.btn-agregar{border:1px solid var(--blue);color:var(--blue);background:#fff}
-.btn-agregar:hover{color:#fff;background:var(--blue)}
-.btn-quitar{border:1px solid #f1c4bf;color:#c0392b;background:#fff}
-.btn-quitar:hover{background:#fdecea}
+.btn-gestionar{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:8px 14px;border:1px solid var(--blue);border-radius:9px;color:#fff;background:var(--blue);font-size:12px;font-weight:700;cursor:pointer}
+.btn-gestionar:hover{background:var(--blue-dark,#1d3f9e)}
 .cargos-grilla{max-height:140px}
 .cargos-grilla .col-codigo{width:70px}
 .cargos-grilla .col-aprob{width:60px;text-align:center}
+/* Consultar / Anular */
+.descripcion-solicitud{max-height:140px;overflow-y:auto;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#f4f7fc;color:var(--text);font-size:12.5px;white-space:pre-wrap;word-break:break-word}
+.descripcion-solicitud--no-disponible{color:var(--muted);font-style:italic}
+.registradas-grilla{max-height:260px}
+.registradas-grilla .col-codigo{width:70px}
+.registradas-grilla .col-estado{width:130px}
+.estado-pill{display:inline-block;padding:3px 9px;border-radius:20px;color:var(--blue);background:#eaf0ff;font-size:11px;font-weight:600}
+.aviso-info{padding:10px 12px;border-radius:10px;background:#f4f7fc}
+.aviso-anulacion{margin:4px 0 12px;padding:12px 14px;border:1px solid #f1c4bf;border-radius:12px;background:#fff7f6;color:var(--text);font-size:12.5px}
+.aviso-anulacion p{margin:6px 0}
+.aviso-backend{color:#a8431e;font-weight:600}
+.modal-btn-peligro{padding:10px 18px;border:1px solid #c0392b;border-radius:10px;color:#fff;background:#c0392b;font-size:12px;font-weight:700;cursor:pointer}
+.modal-btn-peligro:disabled{opacity:.5;cursor:not-allowed}
 </style>
