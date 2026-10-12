@@ -19,6 +19,8 @@ public class JwtTokenUtil {
 
     public JwtTokenUtil(@Value("${app.jwt.secret}") String secret,
                         @Value("${app.jwt.expiration}") long expiration){
+        System.out.println(secret + " " + expiration);
+        System.out.println("llego aqui");
         key = Keys.hmacShaKeyFor(secret.getBytes());
         this.expiration = expiration;
     }
