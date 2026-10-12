@@ -425,6 +425,34 @@ public class RequerimientoRepositoryImpl
         return true;
     }
 
+    /**
+     * spGR_Requerimiento_ListarClasificados: requerimientos que el usuario clasificó, tomados del historial
+     * (GRMaeRequerimientoH, cUsuarioOperacion = cCodPer). Devuelve solo los números, del más reciente al más antiguo.
+     */
+    @Override
+    public List<Integer> listarClasificados(String codigoPersonaOrganizacion, Integer dias, Integer maximo) {
+        String codPer = recortar(codigoPersonaOrganizacion, 4);
+        if (codPer.isEmpty()) {
+            throw solicitudInvalida("Falta el código de personal del usuario (codigoPersonaOrganizacion).");
+        }
+        int diasConsulta = (dias == null || dias <= 0) ? 90 : Math.min(dias, 365);
+        int topConsulta = (maximo == null || maximo <= 0) ? 30 : Math.min(maximo, 100);
+
+        List<Object[]> filas = ejecutarConsulta("dbo.spGR_Requerimiento_ListarClasificados",
+                "<R><XmlGR cCodPer=\"" + escaparXml(codPer) + "\" " +
+                        "iDias=\"" + diasConsulta + "\" " +
+                        "iTop=\"" + topConsulta + "\" /></R>");
+
+        List<Integer> numeros = new ArrayList<>();
+        for (Object[] fila : filas) {
+            Integer numero = entero(fila, 0);
+            if (numero != null && numero > 0) {
+                numeros.add(numero);
+            }
+        }
+        return numeros;
+    }
+
     /** spGR_Requerimiento_Consultar con siTipBus = 2 (datos) y 3 (nombres); se completa con datos y adjuntos. */
     @Override
     public RequerimientoDetalleDTO obtenerParaClasificar(Integer id) {

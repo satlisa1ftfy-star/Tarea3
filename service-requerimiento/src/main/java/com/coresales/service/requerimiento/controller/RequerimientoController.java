@@ -277,6 +277,32 @@ public class RequerimientoController {
         return ResponseEntity.ok().build();
     }
 
+    @GetMapping("/clasificados")
+    @Operation(
+            summary = "Requerimientos clasificados por el usuario",
+            description = """
+                    Números de requerimiento que el usuario clasificó, tomados del historial
+                    (spGR_Requerimiento_ListarClasificados). Del más reciente al más antiguo.
+                    """
+    )
+    public ResponseEntity<List<Integer>> clasificados(
+            @Parameter(description = "Código de personal (cCodPer) del usuario que clasificó.", example = "0295")
+            @RequestParam
+            String codigoPersonaOrganizacion,
+
+            @Parameter(description = "Ventana de días hacia atrás (1 a 365).", example = "90")
+            @RequestParam(required = false, defaultValue = "90")
+            Integer dias,
+
+            @Parameter(description = "Máximo de requerimientos a devolver (1 a 100).", example = "30")
+            @RequestParam(required = false, defaultValue = "30")
+            Integer maximo
+    ) {
+        return ResponseEntity.ok(
+                requerimientoService.listarClasificados(codigoPersonaOrganizacion, dias, maximo)
+        );
+    }
+
     @GetMapping("/detalle/{codigo}")
     @Operation(
             summary = "Detalle de requerimiento",

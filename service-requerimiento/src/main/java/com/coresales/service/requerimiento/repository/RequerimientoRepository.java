@@ -30,4 +30,7 @@ public interface RequerimientoRepository {
     boolean clasificar(ClasificarRequerimientoRequest solicitud, String ipTerminal);
 
     RequerimientoDetalleDTO obtenerParaClasificar(Integer id);
+
+    /** Números de requerimiento que el usuario (cCodPer) clasificó en los últimos días, del más reciente al más antiguo. */
+    List<Integer> listarClasificados(String codigoPersonaOrganizacion, Integer dias, Integer maximo);
 }

@@ -189,4 +189,10 @@ public class RequerimientoServiceImpl
     public RequerimientoDetalleDTO obtenerParaClasificar(Integer id) {
         return requerimientoRepository.obtenerParaClasificar(id);
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Integer> listarClasificados(String codigoPersonaOrganizacion, Integer dias, Integer maximo) {
+        return requerimientoRepository.listarClasificados(codigoPersonaOrganizacion, dias, maximo);
+    }
 }
