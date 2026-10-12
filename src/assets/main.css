@@ -187,6 +187,10 @@
 .volver-pill{display:inline-flex!important;align-items:center;gap:7px;border-radius:20px!important}
 .volver-toolbar{margin-bottom:14px}
 .dashboard-content .busqueda-resultados{margin:0}
+.resultados-seccion+.resultados-seccion{margin-top:18px}
+.resultados-seccion-titulo{display:flex;align-items:baseline;gap:8px;margin:0 0 10px;font-size:12.5px;color:var(--text)}
+.resultados-seccion-titulo b{padding:1px 8px;border-radius:20px;color:var(--blue);background:#eaf0ff;font-size:11px}
+.resultados-seccion-titulo small{color:var(--muted-2);font-weight:400;font-size:11px}
 
 /* -- Mantenimientos / Documentación (scaffold) ----------------------------------*/
 .mantenimiento-toolbar{flex-wrap:wrap;height:auto}

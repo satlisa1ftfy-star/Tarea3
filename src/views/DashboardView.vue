@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { COLUMNA_CLASIFICADOS, ESTADO, buscarAvanzado, cargarClasificados, cargarPendientes, cargarTablero, conClasificados, nombreEstado } from '../models/dashboard'
+import { COLUMNA_CLASIFICADOS, ESTADO, buscarAvanzado, cargarClasificados, cargarPendientes, cargarPendientesOperador, cargarTablero, conClasificados, nombreEstado } from '../models/dashboard'
 import { registrarClasificado } from '../services/clasificadosStore'
 import { listarRoles } from '../services/seguridadService'
 import { listarPersonas } from '../services/personaService'
@@ -71,6 +71,9 @@ const numeroBusqueda = ref('')
 const fechaInicioBusqueda = ref(hoyISO())
 const fechaFinBusqueda = ref(hoyISO())
 const resultadosBusqueda = ref(null)
+// Lista automática del Operador (sin número): «Por clasificar» va en resultadosBusqueda y «Clasificados» aquí.
+const listaOperador = ref(false)
+const resultadosClasificados = ref([])
 const buscandoAvanzado = ref(false)
 const errorBusquedaAvanzada = ref('')
 
@@ -290,6 +293,8 @@ const mostrarNuevoRequerimiento = ref(false)
 
 function abrirNuevoRequerimiento() {
   resultadosBusqueda.value = null
+  listaOperador.value = false
+  resultadosClasificados.value = []
   mostrarNuevoRequerimiento.value = true
 }
 
@@ -535,6 +540,32 @@ const modoBusqueda = computed(() => {
 // Usa la UO del rol activo como aproximación (el SP solo filtra por UO solicitante/responsable).
 const unidadOrganicaBusqueda = computed(() => perfilActivo.value?.codigoUnidadOrganica || 0)
 
+// Bloques de la pantalla de resultados: el Operador en su lista automática ve dos; el resto, uno solo.
+const seccionesResultados = computed(() => {
+  if (resultadosBusqueda.value === null) return []
+  if (!listaOperador.value) {
+    return [{ clave: 'resultados', titulo: '', cards: resultadosBusqueda.value, vacio: 'Sin resultados.', conEstado: false }]
+  }
+  return [
+    {
+      clave: 'porClasificar',
+      titulo: 'Por clasificar',
+      ayuda: 'Registrados en tu unidad',
+      cards: resultadosBusqueda.value,
+      vacio: 'No hay requerimientos Registrados pendientes en tu unidad.',
+      conEstado: false,
+    },
+    {
+      clave: 'clasificados',
+      titulo: 'Clasificados por mí',
+      ayuda: 'Últimos 90 días, en cualquier estado o unidad',
+      cards: resultadosClasificados.value,
+      vacio: 'Aún no hay requerimientos clasificados por ti.',
+      conEstado: true,
+    },
+  ]
+})
+
 // Supervisor:
 const menuSupervisor = computed(() => perfilActivo.value?.nombreRol === 'Supervisor')
 
@@ -578,6 +609,20 @@ function irADocumentacion() {
 async function ejecutarBusquedaAvanzada() {
   buscandoAvanzado.value = true
   const numero = Number(numeroBusqueda.value) || 0
+
+  // Operador sin número: «Por clasificar» (Registrados de su unidad) + «Clasificados» (los que él clasificó).
+  if (modoBusqueda.value === 'automatico' && numero === 0) {
+    const lista = await cargarPendientesOperador(props.perfil, unidadOrganicaBusqueda.value)
+    listaOperador.value = true
+    resultadosBusqueda.value = lista.porClasificar
+    resultadosClasificados.value = lista.clasificados
+    errorBusquedaAvanzada.value = lista.online ? '' : (lista.errorMessage || 'No se pudo buscar.')
+    buscandoAvanzado.value = false
+    return
+  }
+  listaOperador.value = false
+  resultadosClasificados.value = []
+
   const filtro = {
     codigoUoResponsable: unidadOrganicaBusqueda.value,
     numero,
@@ -605,6 +650,8 @@ async function ejecutarBusquedaAvanzada() {
 
 function cerrarBusquedaAvanzada() {
   resultadosBusqueda.value = null
+  listaOperador.value = false
+  resultadosClasificados.value = []
   numeroBusqueda.value = ''
   fechaInicioBusqueda.value = hoyISO()
   fechaFinBusqueda.value = hoyISO()
@@ -643,6 +690,8 @@ watch(() => perfilActivo.value?.nombreRol, () => {
 // Limpia la búsqueda avanzada al cambiar de vista para evitar arrastrar filtros entre secciones.
 watch(vista, () => {
   resultadosBusqueda.value = null
+  listaOperador.value = false
+  resultadosClasificados.value = []
   numeroBusqueda.value = ''
   metricaSeleccionada.value = null
   refrescar()
@@ -818,25 +867,31 @@ onMounted(() => {
               </span>
             </div>
             <section class="busqueda-resultados">
-              <header><strong>Resultados de búsqueda avanzada</strong><button class="cerrar-busqueda" @click="cerrarBusquedaAvanzada"><Icon name="x" :size="14" /> Cerrar</button></header>
+              <header><strong>{{ listaOperador ? 'Resultados de la búsqueda' : 'Resultados de búsqueda avanzada' }}</strong><button class="cerrar-busqueda" @click="cerrarBusquedaAvanzada"><Icon name="x" :size="14" /> Cerrar</button></header>
               <p v-if="buscandoAvanzado" class="conn-status">Buscando…</p>
-              <p v-else-if="errorBusquedaAvanzada" class="conn-status conn-status--offline">⚠ {{ errorBusquedaAvanzada }}</p>
-              <p v-else-if="!resultadosBusqueda.length" class="empty-column">Sin resultados.</p>
-              <div v-else class="cards cards-grid">
-                <article v-for="card in resultadosBusqueda" :key="card[0]" class="request-card" @click="seleccionarRequerimiento(card, { title: 'Búsqueda avanzada' })">
-                  <div class="card-top">
-                    <strong>{{ card[0] }}</strong>
-                    <span class="priority-badge" :class="card[4].toLowerCase()">
-                      <Icon v-if="['alta', 'importante'].includes(card[4].toLowerCase())" name="star" :size="10" />
-                      <Icon v-else-if="card[4].toLowerCase() === 'urgente'" name="zap" :size="10" />
-                      {{ card[4] }}
-                    </span>
+              <p v-if="!buscandoAvanzado && errorBusquedaAvanzada" class="conn-status conn-status--offline">⚠ {{ errorBusquedaAvanzada }}</p>
+              <template v-if="!buscandoAvanzado && (listaOperador || !errorBusquedaAvanzada)">
+                <div v-for="seccion in seccionesResultados" :key="seccion.clave" class="resultados-seccion">
+                  <h3 v-if="seccion.titulo" class="resultados-seccion-titulo">{{ seccion.titulo }} <b>{{ seccion.cards.length }}</b><small v-if="seccion.ayuda">{{ seccion.ayuda }}</small></h3>
+                  <p v-if="!seccion.cards.length" class="empty-column">{{ seccion.vacio }}</p>
+                  <div v-else class="cards cards-grid">
+                    <article v-for="card in seccion.cards" :key="card[0]" class="request-card" @click="seleccionarRequerimiento(card, { title: 'Búsqueda avanzada' })">
+                      <div class="card-top">
+                        <strong>{{ card[0] }}</strong>
+                        <span class="priority-badge" :class="card[4].toLowerCase()">
+                          <Icon v-if="['alta', 'importante'].includes(card[4].toLowerCase())" name="star" :size="10" />
+                          <Icon v-else-if="card[4].toLowerCase() === 'urgente'" name="zap" :size="10" />
+                          {{ card[4] }}
+                        </span>
+                      </div>
+                      <h3>{{ card[1] }}</h3>
+                      <p class="card-area">{{ card[2] }}</p>
+                      <p v-if="seccion.conEstado" class="card-area">{{ nombreEstado(card[5]) }} · {{ card[6] }}<template v-if="card[7]"> / {{ card[7] }}</template></p>
+                      <div class="card-footer"><span class="card-date"><Icon name="calendar" :size="12" />{{ card[3] }}</span></div>
+                    </article>
                   </div>
-                  <h3>{{ card[1] }}</h3>
-                  <p class="card-area">{{ card[2] }}</p>
-                  <div class="card-footer"><span class="card-date"><Icon name="calendar" :size="12" />{{ card[3] }}</span></div>
-                </article>
-              </div>
+                </div>
+              </template>
             </section>
           </template>
         </template>

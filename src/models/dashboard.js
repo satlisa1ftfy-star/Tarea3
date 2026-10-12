@@ -1,4 +1,4 @@
-import { buscarRequerimientos } from '../services/requerimientoService'
+import { buscarRequerimientos, listarClasificadosPorUsuario } from '../services/requerimientoService'
 import { listarClasificados } from '../services/clasificadosStore'
 
 // (bloques "Conteo de requerimientos" / "Mis Requerimientos" del legado).
@@ -57,6 +57,7 @@ export const mockColumnsPendientes = [
  */
 export async function buscarAvanzado({
   codigoUoResponsable = 0,
+  codigoUoRequerimiento = 0,
   numero = 0,
   codigoEstado = 0,
   fechaInicio = 'TODO',
@@ -65,6 +66,7 @@ export async function buscarAvanzado({
   try {
     const requerimientos = await buscarRequerimientos({
       codigoUoResponsable,
+      codigoUoRequerimiento,
       numero,
       codigoEstado,
       fechaInicio,
@@ -125,12 +127,68 @@ const MAX_CLASIFICADOS_VISIBLES = 30
  */
 export async function cargarClasificados(perfil = null) {
   const codigos = listarClasificados(perfil).slice(0, MAX_CLASIFICADOS_VISIBLES)
+  return tarjetasPorNumero(codigos)
+}
+
+/** Consulta cada número (sin filtro de unidad ni de estado) y devuelve sus tarjetas, en el mismo orden. */
+async function tarjetasPorNumero(codigos) {
   const resultados = await Promise.allSettled(
     codigos.map((numero) => buscarRequerimientos({ numero }))
   )
   return resultados
     .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
     .map(aTarjeta)
+}
+
+/**
+ * Números que el Operador clasificó: los del historial en la base (endpoint /clasificados) más los del
+ * registro local de este navegador. Si el endpoint no responde se usa solo el registro local.
+ */
+async function codigosClasificadosOperador(perfil) {
+  const local = listarClasificados(perfil)
+  let servidor = []
+  const codPer = perfil?.codigoPersonaOrganizacion
+  if (codPer) {
+    try {
+      servidor = (await listarClasificadosPorUsuario(codPer, { maximo: MAX_CLASIFICADOS_VISIBLES })) || []
+    } catch (error) {
+      console.warn('No se pudo leer los clasificados del historial; se usa el registro local.', error)
+    }
+  }
+  const unicos = [...new Set([...servidor, ...local].map(Number).filter((n) => n > 0))]
+  return unicos.slice(0, MAX_CLASIFICADOS_VISIBLES)
+}
+
+/**
+ * Mis pendientes del Operador, sin escribir número:
+ *  - porClasificar: Registrados (estado 1) cuya ubicación actual es la unidad del Operador.
+ *  - clasificados: los que el Operador clasificó (cualquier unidad o estado actual).
+ * Un requerimiento clasificado que siga Registrado en la unidad aparece solo en «clasificados».
+ * Cada bloque falla por separado: si uno no responde el otro se muestra igual.
+ */
+export async function cargarPendientesOperador(perfil = null, codigoUoRequerimiento = 0) {
+  const [porClasificarRes, clasificadosRes] = await Promise.allSettled([
+    codigoUoRequerimiento > 0
+      ? buscarRequerimientos({ codigoUoRequerimiento, codigoEstado: ESTADO.REGISTRADO, vigencia: 1 })
+      : Promise.resolve([]),
+    codigosClasificadosOperador(perfil).then(tarjetasPorNumero),
+  ])
+
+  const clasificados = clasificadosRes.status === 'fulfilled' ? clasificadosRes.value : []
+  const enClasificados = new Set(clasificados.map((c) => c[0]))
+  const porClasificar = porClasificarRes.status === 'fulfilled'
+    ? porClasificarRes.value.map(aTarjeta).filter((c) => !enClasificados.has(c[0]))
+    : []
+
+  const fallo = [porClasificarRes, clasificadosRes].find((r) => r.status === 'rejected')
+  if (fallo) console.error('Falló parte de la carga de pendientes del Operador.', fallo.reason)
+
+  return {
+    porClasificar,
+    clasificados,
+    online: !fallo,
+    errorMessage: fallo ? (fallo.reason?.message || 'Error desconocido') : '',
+  }
 }
 
 const NOMBRE_ESTADO = {

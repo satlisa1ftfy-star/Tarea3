@@ -10,6 +10,14 @@ export function buscarRequerimientos(filtros = {}) {
 }
 
 /**
+ * Números de requerimiento que el usuario clasificó (GET /api/requerimiento/clasificados), tomados del
+ * historial en la base. Devuelve un arreglo de enteros, del más reciente al más antiguo.
+ */
+export function listarClasificadosPorUsuario(codigoPersonaOrganizacion, { dias = 90, maximo = 30 } = {}) {
+  return http.get('/api/requerimiento/clasificados', { codigoPersonaOrganizacion, dias, maximo })
+}
+
+/**
  * Asigna un requerimiento a una persona responsable.
  * payload: { codigoRequerimiento, codigoPersonaAsigna, codigoPersonaResponsable,
  *            responsablePrincipal, informeTecnico, observacion, codigoPersonaActualizacion }
