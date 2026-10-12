@@ -1,5 +1,6 @@
 package com.coresales.service.user.auth.service;
 
+import com.coresales.service.user.auth.model.SesionResponse;
 import com.coresales.service.user.auth.model.UsuarioRolDetalle;
 import com.coresales.service.user.auth.model.UsuarioSesion;
 
@@ -14,5 +15,11 @@ public interface ISeguridadService {
     List<UsuarioRolDetalle> listarRoles(
             String usuarioWindows,
             Integer codigoRol
+    );
+
+    SesionResponse registrarInicioSesion(
+            String usuarioWindows,
+            Integer codigoPersonaRol,
+            String nombreTerminal
     );
 }

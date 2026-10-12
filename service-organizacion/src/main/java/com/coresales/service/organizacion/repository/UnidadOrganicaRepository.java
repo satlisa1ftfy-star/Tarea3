@@ -1,6 +1,6 @@
-package com.coresales.service.requerimiento.repository;
+package com.coresales.service.organizacion.repository;
 
-import com.coresales.service.requerimiento.model.UnidadOrganica;
+import com.coresales.service.organizacion.model.UnidadOrganica;
 import java.util.List;
 
 public interface UnidadOrganicaRepository {

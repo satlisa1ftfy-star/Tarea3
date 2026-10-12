@@ -1,7 +1,7 @@
-package com.coresales.service.requerimiento.repository;
+package com.coresales.service.organizacion.repository;
 
 
-import com.coresales.service.requerimiento.model.UnidadOrganica;
+import com.coresales.service.organizacion.model.UnidadOrganica;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.ParameterMode;
 import jakarta.persistence.PersistenceContext;
