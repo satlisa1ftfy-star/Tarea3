@@ -1,7 +1,7 @@
-package com.coresales.service.requerimiento.service;
+package com.coresales.service.organizacion.service;
 
-import com.coresales.service.requerimiento.model.UnidadOrganica;
-import com.coresales.service.requerimiento.repository.UnidadOrganicaRepository;
+import com.coresales.service.organizacion.model.UnidadOrganica;
+import com.coresales.service.organizacion.repository.UnidadOrganicaRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

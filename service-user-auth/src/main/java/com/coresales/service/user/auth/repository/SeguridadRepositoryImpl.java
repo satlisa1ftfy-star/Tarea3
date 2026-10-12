@@ -18,6 +18,9 @@ public class SeguridadRepositoryImpl
     private static final String STORED_PROCEDURE =
             "dbo.spGR_Seguridad_ConsultarUsuario";
 
+    private static final String SP_REGISTRAR_INICIO_SESION =
+            "dbo.spGR_Seguridad_RegistrarInicioSesion";
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -135,6 +138,58 @@ public class SeguridadRepositoryImpl
         }
 
         return roles;
+    }
+
+    @Override
+    public Integer registrarInicioSesion(
+            Integer codigoPersonaGr,
+            Integer codigoPersonaRol,
+            String codigoSesion,
+            String codigoPersonaActualizacion,
+            String nombreTerminal
+    ) {
+
+        String xml =
+                "<R>" +
+                        "<XmlGR " +
+                        "iCodigo_Per=\"" + codigoPersonaGr + "\" " +
+                        "iCodigo_PerRol=\"" + codigoPersonaRol + "\" " +
+                        "vCodigoSesion_Ac=\"" + escaparXml(codigoSesion) + "\" " +
+                        "cCodPerActualizacion=\"" + escaparXml(codigoPersonaActualizacion) + "\" " +
+                        "cNombreTerminal_Ac=\"" + escaparXml(nombreTerminal) + "\" " +
+                        "/>" +
+                        "</R>";
+
+        StoredProcedureQuery query =
+                entityManager.createStoredProcedureQuery(
+                        SP_REGISTRAR_INICIO_SESION
+                );
+
+        query.registerStoredProcedureParameter(
+                "ptXmlGR",
+                String.class,
+                ParameterMode.IN
+        );
+
+        query.setParameter(
+                "ptXmlGR",
+                xml
+        );
+
+        // El SP devuelve una sola columna: iCodigo_Ing
+        List<?> resultados = query.getResultList();
+
+        if (resultados.isEmpty()) {
+            return null;
+        }
+
+        Object valor = resultados.get(0);
+
+        if (valor instanceof Object[] fila) {
+            valor = fila.length > 0 ? fila[0] : null;
+        }
+
+        return convertirInteger(valor);
     }
 
     private List<Object[]> ejecutar(String xml) {

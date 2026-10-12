@@ -1,16 +1,19 @@
 package com.coresales.service.requerimiento.controller;
 
-import com.coresales.service.requerimiento.model.*;
+import com.coresales.service.requerimiento.model.AsignarRequerimientoRequest;
+import com.coresales.service.requerimiento.model.Requerimiento;
+import com.coresales.service.requerimiento.model.RequerimientoAsignado;
 import com.coresales.service.requerimiento.service.IRequerimientoAsignacionService;
 import com.coresales.service.requerimiento.service.IRequerimientoService;
-import com.coresales.service.requerimiento.service.IRequerimientoAutorizarService;
-import com.coresales.service.requerimiento.util.AuditoriaContext;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
+
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -26,23 +29,15 @@ public class RequerimientoController {
 
     private final IRequerimientoService requerimientoService;
     private final IRequerimientoAsignacionService requerimientoAsignacionService;
-    private final IRequerimientoAutorizarService requerimientoAutorizarService;
-    private final AuditoriaContext auditoriaContext;
 
     public RequerimientoController(
             IRequerimientoService requerimientoService,
-            IRequerimientoAsignacionService requerimientoAsignacionService,
-            IRequerimientoAutorizarService requerimientoAutorizarService,
-            AuditoriaContext auditoriaContext
-
+            IRequerimientoAsignacionService requerimientoAsignacionService
     ) {
         this.requerimientoService =
                 requerimientoService;
         this.requerimientoAsignacionService =
                 requerimientoAsignacionService;
-        this.requerimientoAutorizarService =
-                requerimientoAutorizarService;
-        this.auditoriaContext=auditoriaContext;
     }
 
     @GetMapping("/buscar")
@@ -196,9 +191,11 @@ public class RequerimientoController {
     public ResponseEntity<RequerimientoAsignado> asignar(
             @RequestBody
             AsignarRequerimientoRequest solicitud,
-            String ipCliente,
             HttpServletRequest httpRequest
     ) {
+
+        String ipCliente =
+                obtenerIpCliente(httpRequest);
 
         return ResponseEntity.ok(
                 requerimientoAsignacionService.asignar(
@@ -208,23 +205,19 @@ public class RequerimientoController {
         );
     }
 
+    /**
+     * Lee la IP real del usuario desde 'X-Forwarded-For' por si la petición pasa
+     * por un proxy/balanceador. Si no existe la cabecera, usa la IP directa (getRemoteAddr).
+     */
+    private String obtenerIpCliente(HttpServletRequest request) {
 
-    @PostMapping("/autorizar")
-    @Operation( summary = "Autorizar requerimiento",
-            description = "Autoriza un requerimiento asignado"
-    )
-    public ResponseEntity<RequerimientoResultado> autorizar(
-            //@Valid
-            @RequestBody AutorizarRequerimientoRequest solicitud
-    ) {
-        solicitud.setNomTerminal(auditoriaContext.getIpCliente());
+        String forwardedFor =
+                request.getHeader("X-Forwarded-For");
 
-        System.out.println(solicitud);
-        return ResponseEntity.ok(
-                requerimientoAutorizarService.autorizar(
-                        solicitud
-                )
-        );
+        if (StringUtils.hasText(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+
+        return request.getRemoteAddr();
     }
-
 }

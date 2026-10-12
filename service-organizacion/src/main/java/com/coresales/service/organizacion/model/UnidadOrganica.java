@@ -1,4 +1,4 @@
-package com.coresales.service.requerimiento.model;
+package com.coresales.service.organizacion.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

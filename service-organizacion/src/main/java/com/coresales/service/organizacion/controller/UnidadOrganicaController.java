@@ -1,7 +1,7 @@
-package com.coresales.service.requerimiento.controller;
+package com.coresales.service.organizacion.controller;
 
-import com.coresales.service.requerimiento.model.UnidadOrganica;
-import com.coresales.service.requerimiento.service.IUnidadOrganicaService;
+import com.coresales.service.organizacion.model.UnidadOrganica;
+import com.coresales.service.organizacion.service.IUnidadOrganicaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -11,11 +11,11 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/requerimiento")
+@RequestMapping("/api/organizacion")
 @CrossOrigin("http://localhost:5173")
 @Tag(
-        name = "Gestión de Requerimientos",
-        description = "Servicios de Gestión de Requerimientos"
+        name = "Organización",
+        description = "Consulta de unidades orgánicas y personal (BD Organizacion)"
 )
 public class UnidadOrganicaController {
 

@@ -1,5 +1,6 @@
 package com.coresales.service.user.auth.service;
 
+import com.coresales.service.user.auth.model.SesionResponse;
 import com.coresales.service.user.auth.model.UsuarioRolDetalle;
 import com.coresales.service.user.auth.model.UsuarioSesion;
 import com.coresales.service.user.auth.repository.SeguridadRepository;
@@ -9,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class SeguridadServiceImpl
@@ -67,6 +69,70 @@ public class SeguridadServiceImpl
                 usuario,
                 codigoRol == null ? 0 : codigoRol
         );
+    }
+
+    /**
+     * Registra el ingreso con el rol elegido (spGR_Seguridad_RegistrarInicioSesion).
+     * El rol debe pertenecer al usuario del token; persona y cCodPer se toman del propio rol.
+     */
+    @Override
+    @Transactional
+    public SesionResponse registrarInicioSesion(
+            String usuarioWindows,
+            Integer codigoPersonaRol,
+            String nombreTerminal
+    ) {
+
+        String usuario = normalizar(usuarioWindows);
+
+        if (codigoPersonaRol == null || codigoPersonaRol <= 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Debe indicar el codigoPersonaRol del rol elegido."
+            );
+        }
+
+        UsuarioRolDetalle rol =
+                seguridadRepository.listarRolesUsuario(usuario, 0)
+                        .stream()
+                        .filter(r -> codigoPersonaRol.equals(r.getCodigoPersonaRol()))
+                        .findFirst()
+                        .orElseThrow(() -> new ResponseStatusException(
+                                HttpStatus.FORBIDDEN,
+                                "El rol indicado no pertenece al usuario '" + usuario + "' o no está activo."
+                        ));
+
+        // vCodigoSesion_Ac es Varchar(30)
+        String codigoSesion =
+                UUID.randomUUID().toString().replace("-", "").substring(0, 30);
+
+        Integer codigoIngreso =
+                seguridadRepository.registrarInicioSesion(
+                        rol.getCodigoPersonaGr(),
+                        rol.getCodigoPersonaRol(),
+                        codigoSesion,
+                        rol.getCodigoPersonaOrganizacion(),
+                        recortar(nombreTerminal, 20)   // cNombreTerminal_Ac es Char(20)
+                );
+
+        return new SesionResponse(
+                codigoIngreso,
+                codigoSesion,
+                rol.getCodigoPersonaGr(),
+                rol.getCodigoPersonaRol(),
+                rol.getCodigoRol(),
+                rol.getNombreRol()
+        );
+    }
+
+    private String recortar(String valor, int maximo) {
+
+        if (valor == null) {
+            return "";
+        }
+
+        String limpio = valor.trim();
+        return limpio.length() > maximo ? limpio.substring(0, maximo) : limpio;
     }
 
     private String normalizar(String usuarioWindows) {
