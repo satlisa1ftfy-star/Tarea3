@@ -21,7 +21,7 @@ public class SolicitarAutorizaRequerimientoRequest extends BaseAuditoriaRequest 
         @Schema(description = "Código de la persona que autoriza.",
                 example = "286768")
         @Positive(message = "El código de Autorizacion debe ser mayor a 0.")
-        @NotNull( message = "El código de Autorizacion es obligatorio.")
+        //@NotNull( message = "El código de Autorizacion es obligatorio.")
     private String codPerAutoriza;
         @Schema(description = "Código de la persona que solicita la autorizacion.",
                 example = "286768")
@@ -31,7 +31,7 @@ public class SolicitarAutorizaRequerimientoRequest extends BaseAuditoriaRequest 
         @Schema(description = "Código de la persona que solicita la autorizacion.",
                 example = "286768")
         @Positive(message = "El código de la persona que anula la solicitud de la Autorizacion debe ser mayor a 0.")
-        @NotNull( message = "El código de la persona que anula la solicitud de la Autorizacion es obligatorio.")
+        //@NotNull( message = "El código de la persona que anula la solicitud de la Autorizacion es obligatorio.")
     private String codPerSolAnulacion;
         @Schema(description = "Código de la persona de helpdesk.",
                 example = "286768")

@@ -1,6 +1,8 @@
 package com.coresales.service.requerimiento.repository;
 import com.coresales.service.requerimiento.constant.RequerimientoTipos;
+import com.coresales.service.requerimiento.dto.response.ConsultaSolicitudAutorizaResponse;
 import com.coresales.service.requerimiento.model.RequerimientoResultado;
+import com.coresales.service.requerimiento.model.RolPersona;
 import com.coresales.service.requerimiento.model.SolicitarAutorizaRequerimientoRequest;
 import com.coresales.service.requerimiento.util.XmlBuilder;
 import jakarta.persistence.EntityManager;
@@ -9,6 +11,7 @@ import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.StoredProcedureQuery;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -17,7 +20,9 @@ import static com.coresales.service.requerimiento.constant.RequerimientoConstant
 @Repository
 public class RequerimientoSolicitaAutorizaRepositoryImpl
         implements RequerimientoSolicitaAutorizaRepository {
-    private static final String SP_AUTORIZAR ="dbo.spGR_Requerimiento_RegistrarPersonaAutorizacion";
+    private static final String SP_SOLICITUD ="dbo.spGR_Requerimiento_RegistrarPersonaAutorizacion";
+    private static final String SP_SOLICITUD_CONSULTA ="dbo.spGR_Requerimiento_ConsultarPersonaAutorizacion";
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -43,7 +48,7 @@ public class RequerimientoSolicitaAutorizaRepositoryImpl
         );
         String xml = "<R>" + xmlGR + "</R>";
         StoredProcedureQuery query =
-                entityManager.createStoredProcedureQuery(SP_AUTORIZAR);
+                entityManager.createStoredProcedureQuery(SP_SOLICITUD);
 
         query.registerStoredProcedureParameter(
                 "ptXmlGR",
@@ -64,5 +69,43 @@ public class RequerimientoSolicitaAutorizaRepositoryImpl
             }
         }
         return resultado;
+    }
+
+    @Override
+    public List<ConsultaSolicitudAutorizaResponse> consultarSolicitud(
+            String tipBus, Integer codigoRequerimiento) {
+        String xmlGR = XmlBuilder.elemento(
+                "XmlGR",
+                Map.of(
+                        "siTipBus", tipBus,
+                        "iCodigo_Req", codigoRequerimiento
+                )
+        );
+        String xml = "<R>" + xmlGR + "</R>";
+        StoredProcedureQuery query =
+                entityManager.createStoredProcedureQuery(SP_SOLICITUD_CONSULTA);
+
+        query.registerStoredProcedureParameter(
+                "ptXmlGR",
+                String.class,
+                ParameterMode.IN
+        );
+        query.setParameter("ptXmlGR", xml);
+        @SuppressWarnings("unchecked")
+        List<Object[]> resultados = query.getResultList();
+
+        List<ConsultaSolicitudAutorizaResponse> resAut =new ArrayList<>();
+
+        for (Object[] fila : resultados) {
+
+            Object valor = resultados.get(0);
+            ConsultaSolicitudAutorizaResponse sol=new ConsultaSolicitudAutorizaResponse();
+            sol.setCodigo(fila[0] == null? null: fila[0].toString().trim());
+            sol.setNombre(fila[1] == null? null: fila[1].toString().trim());
+            sol.setEstado(fila[2] == null? null: fila[2].toString().trim());
+
+            resAut.add(sol);
+        }
+        return resAut;
     }
 }

@@ -28,13 +28,12 @@ public class SeguridadRepositoryImpl
     public UsuarioSesion consultarUsuario(
             String usuarioWindows
     ) {
-
         String xml = construirXml(
                 1,
                 usuarioWindows,
                 0
         );
-
+        System.out.println("xml "+xml);
         List<Object[]> resultados =
                 ejecutar(xml);
 
