@@ -18,24 +18,32 @@ export function asignarRequerimiento(payload) {
 }
 
 /**
- * Detalle del requerimiento:
- * medio de envío, asignado por, ubicación, tipo de evaluación, correos copia, etc.
+ * Cargos autorizados para un requerimiento según su categoría/subcategoría.
+ * GET /api/requerimiento/buscarCargo?TipBus=&codigoReq=&codigoCat=&Codigo_SubCat=
  */
-export function consultarDetalleRequerimiento(codigo) {
-  return http.get(`/api/requerimiento/detalle/${encodeURIComponent(codigo)}`)
+export function buscarCargosAutorizados({ tipBus, codigoReq, codigoCat, codigoSubCat }) {
+  return http.get('/api/requerimiento/buscarCargo', {
+    TipBus: tipBus,
+    codigoReq,
+    codigoCat,
+    Codigo_SubCat: codigoSubCat,
+  })
 }
 
 /**
- * Historial de movimientos, del más reciente al más antiguo.
+ * Personas a las que ya se solicitó autorización para el requerimiento.
+ * GET /api/requerimiento/consultarSolicitud?codigoRequerimiento=
+ * Respuesta: [{ codigo, nombre, estado }]
  */
-export function consultarHistorialRequerimiento(codigo) {
-  return http.get(`/api/requerimiento/historial/${encodeURIComponent(codigo)}`)
+export function consultarSolicitud(codigoRequerimiento) {
+  return http.get('/api/requerimiento/consultarSolicitud', { codigoRequerimiento })
 }
 
 /**
- * Documentos adjuntos. Solo lista: la descarga
- * queda pendiente del servicio de documentos.
+ * Solicita la autorización de un requerimiento a una o más personas.
+ * payload: { codRequerimiento, codPerAutoriza ('1001,1002'), codPerSolAutorizacion,
+ *            codPerHelpDesk, codPerActualiza, observacion }
  */
-export function consultarAdjuntosRequerimiento(codigo) {
-  return http.get(`/api/requerimiento/adjuntos/${encodeURIComponent(codigo)}`)
+export function solicitarAutorizacion(payload) {
+  return http.post('/api/requerimiento/solicitar', payload)
 }

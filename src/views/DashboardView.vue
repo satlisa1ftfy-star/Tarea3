@@ -1,10 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import {
-  ESTADO, PESTANAS, buscarAvanzado, cargarNoClasificados, cargarPestanas, construirTablero, repartirResultados,
-  formatearFechaHora, htmlATexto,
-} from '../models/dashboard'
-import { listarRoles, registrarSesion } from '../services/seguridadService'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ESTADO, buscarAvanzado, cargarPendientes, cargarTablero } from '../models/dashboard'
+import { listarRoles } from '../services/seguridadService'
 import { listarPersonas } from '../services/personaService'
 import { buscarUnidadOrganica } from '../services/unidadOrganicaService'
 import {
@@ -13,6 +10,7 @@ import {
 import { buscarCategorias, buscarSubcategorias } from '../services/categoriaService'
 import Icon from '../components/Icon.vue'
 import Paginador from '../components/Paginador.vue'
+import SolicitarAutorizacionModal from '../components/requerimiento/SolicitarAutorizacionModal.vue'
 
 const props = defineProps({
   perfil: { type: Object, default: null },
@@ -480,6 +478,8 @@ function irARequerimientos() {
 function seleccionarRequerimiento(card, column) {
   selectedRequest.value = card
   selectedColumn.value = column
+  menuAutorizacionesAbierto.value = false
+  mensajeAutorizacion.value = ''
 }
 
 // Clic en la tarjeta o en la fila: abre la vista completa de detalle (ya no el panel lateral).
@@ -493,6 +493,7 @@ function abrirDetalle(card, column, seccion = null) {
 }
 
 function cerrarDetalle() {
+  menuAutorizacionesAbierto.value = false
   selectedRequest.value = null
   selectedColumn.value = null
   vistaDetalle.value = false
@@ -845,6 +846,86 @@ async function confirmarAsignacion() {
     asignando.value = false
   }
 }
+
+// -------------------------------------------------------------------------
+// Autorizaciones: la lógica del modal vive en
+// components/requerimiento/SolicitarAutorizacionModal.vue. Aquí solo se
+// controla el menú "Autorizaciones", el modo con que se abre el modal
+// ('solicitar' | 'consultar' | 'anular') y el mensaje del panel de detalle.
+const mostrarModalAutorizacion = ref(false)
+const modoAutorizacion = ref('solicitar')
+const mensajeAutorizacion = ref('')
+
+function abrirModalAutorizacion(modo = 'solicitar') {
+  mensajeAutorizacion.value = ''
+  modoAutorizacion.value = modo
+  mostrarModalAutorizacion.value = true
+}
+
+// Menú desplegable: se cierra al elegir una opción, al hacer clic fuera y con Escape.
+const menuAutorizacionesAbierto = ref(false)
+const menuAutorizacionesRef = ref(null)
+const botonAutorizacionesRef = ref(null)
+
+async function alternarMenuAutorizaciones() {
+  menuAutorizacionesAbierto.value = !menuAutorizacionesAbierto.value
+  if (menuAutorizacionesAbierto.value) {
+    await nextTick()
+    menuAutorizacionesRef.value?.querySelector('[role="menuitem"]')?.focus()
+  }
+}
+
+function cerrarMenuAutorizaciones(devolverFoco = false) {
+  menuAutorizacionesAbierto.value = false
+  if (devolverFoco) botonAutorizacionesRef.value?.focus()
+}
+
+function elegirAccionAutorizacion(modo) {
+  cerrarMenuAutorizaciones()
+  abrirModalAutorizacion(modo)
+}
+
+// Teclado: flechas para moverse entre opciones, Escape para cerrar.
+function alTeclaMenuAutorizaciones(event) {
+  if (!menuAutorizacionesAbierto.value) return
+  const opciones = [...(menuAutorizacionesRef.value?.querySelectorAll('[role="menuitem"]') || [])]
+  const actual = opciones.indexOf(document.activeElement)
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    cerrarMenuAutorizaciones(true)
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    const paso = event.key === 'ArrowDown' ? 1 : -1
+    opciones[(actual + paso + opciones.length) % opciones.length]?.focus()
+  }
+}
+
+function alClicFueraMenuAutorizaciones(event) {
+  if (!menuAutorizacionesAbierto.value) return
+  const contenedor = menuAutorizacionesRef.value // botón + lista de opciones
+  if (contenedor && !contenedor.contains(event.target)) cerrarMenuAutorizaciones()
+}
+onMounted(() => document.addEventListener('pointerdown', alClicFueraMenuAutorizaciones))
+onBeforeUnmount(() => document.removeEventListener('pointerdown', alClicFueraMenuAutorizaciones))
+
+function cerrarModalAutorizacion() {
+  mostrarModalAutorizacion.value = false
+}
+
+function alPrepararSolicitudAutorizacion(payload) {
+  mostrarModalAutorizacion.value = false
+  mensajeAutorizacion.value = `Solicitud de autorización preparada para ${payload.codigosPersonaAutoriza.length} persona(s).`
+}
+
+// Carga según rol activo: Administrador usa búsqueda manual; Operador autocarga
+const modoBusqueda = computed(() => {
+  const rol = perfilActivo.value?.nombreRol
+  if (rol === 'Administrador') return 'manual'
+  if (rol === 'Operador') return 'automatico'
+  return null
+})
+// Usa la UO del rol activo como aproximación (el SP solo filtra por UO solicitante/responsable).
+const unidadOrganicaBusqueda = computed(() => perfilActivo.value?.codigoUnidadOrganica || 0)
 
 // Supervisor:
 const menuSupervisor = computed(() => perfilActivo.value?.nombreRol === 'Supervisor')
@@ -1470,7 +1551,77 @@ onBeforeUnmount(() => {
       </template>
     </section>
 
-    <!-- Panel "Búsqueda Avanzada" (Figma). La fecha viene por defecto con el día de hoy. -->
+    <!-- Panel de detalle -->
+    <aside v-if="selectedRequest" class="detail-panel">
+      <div class="detail-panel-head">
+        <div>
+          <button class="detail-back" @click="cerrarDetalle"><Icon name="arrow-left" :size="14" /> Volver al tablero</button>
+          <div class="detail-title-row">
+            <b>{{ selectedRequest[0] }}</b>
+            <span class="status-pill" :style="{ color: 'var(--blue)', background: '#eaf0ff' }">{{ selectedColumn?.title }}</span>
+            <span class="priority-badge" :class="selectedRequest[4].toLowerCase()">{{ selectedRequest[4] }}</span>
+          </div>
+          <h2 class="detail-subtitle">{{ selectedRequest[1] }}</h2>
+        </div>
+        <button class="close-detail" aria-label="Cerrar detalle" @click="cerrarDetalle"><Icon name="x" :size="18" /></button>
+      </div>
+
+      <div class="detail-actions">
+        <button class="move"><Icon name="move" :size="14" /> Mover de estado</button>
+        <button v-if="puedeAsignar" class="asignar" @click="abrirModalAsignar"><Icon name="user-plus" :size="14" /> Asignar</button>
+        <!-- Botón dividido de autorizaciones: la zona principal abre directamente
+             "Solicitar autorización"; la flecha despliega Solicitar / Consultar / Anular
+             (todas abren el mismo modal en distinto modo). -->
+        <div ref="menuAutorizacionesRef" class="menu-autorizaciones" @keydown="alTeclaMenuAutorizaciones">
+          <div class="menu-autorizaciones-grupo">
+            <button type="button" class="menu-autorizaciones-principal" @click="elegirAccionAutorizacion('solicitar')">
+              <Icon name="shield" :size="14" /> Solicitar autorización
+            </button>
+            <button
+              ref="botonAutorizacionesRef"
+              type="button"
+              class="menu-autorizaciones-toggle"
+              aria-label="Más acciones de autorización"
+              aria-haspopup="menu"
+              :aria-expanded="menuAutorizacionesAbierto"
+              @click="alternarMenuAutorizaciones"
+            >
+              <Icon :name="menuAutorizacionesAbierto ? 'chevron-up' : 'chevron-down'" :size="13" />
+            </button>
+          </div>
+          <div v-if="menuAutorizacionesAbierto" class="menu-autorizaciones-lista" role="menu" aria-label="Autorizaciones">
+            <button type="button" role="menuitem" @click="elegirAccionAutorizacion('solicitar')">
+              <Icon name="shield" :size="14" /> Solicitar autorización
+            </button>
+            <div class="menu-autorizaciones-separador" role="separator"></div>
+            <button type="button" role="menuitem" class="menu-autorizaciones-anular" @click="elegirAccionAutorizacion('anular')">
+              <Icon name="x" :size="14" /> Anular autorizaciones…
+            </button>
+          </div>
+        </div>
+        <template v-if="puedeDarConformidad">
+          <button class="conformidad-si"><Icon name="check" :size="14" /> Dar conformidad</button>
+          <button class="conformidad-no"><Icon name="x" :size="14" /> Dar no conformidad</button>
+        </template>
+        <button><Icon name="history" :size="14" /> Ver historial</button>
+      </div>
+
+      <div class="detail-body">
+        <p v-if="mensajeAutorizacion" class="conn-status">✓ {{ mensajeAutorizacion }}</p>
+        <div class="detail-card">
+          <h3>Datos del Requerimiento</h3>
+          <dl class="detail-grid">
+            <div><dt>N° Requerimiento</dt><dd>{{ selectedRequest[0] }}</dd></div>
+            <div><dt>Fecha</dt><dd>{{ selectedRequest[3] }}</dd></div>
+            <div><dt>Estado actual</dt><dd class="orange">{{ selectedColumn?.title }}</dd></div>
+            <div><dt>Prioridad</dt><dd>{{ selectedRequest[4] }}</dd></div>
+            <div style="grid-column:1/-1"><dt>Área solicitante</dt><dd>{{ selectedRequest[2] }}</dd></div>
+          </dl>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Panel "Búsqueda Avanzada" (Cambio 19) -->
     <div v-if="mostrarPanelBusqueda" class="modal-overlay" @click.self="cerrarPanelBusqueda">
       <aside class="filtros-panel">
         <div class="filtros-panel-head">
@@ -1619,6 +1770,19 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    <!-- Modal Solicitar autorización -->
+    <SolicitarAutorizacionModal
+      :visible="mostrarModalAutorizacion"
+      :modo="modoAutorizacion"
+      :perfil="perfil"
+      :requerimiento="selectedRequest"
+      :estado="selectedColumn?.title"
+      :codigo-requerimiento="codigoRequerimientoSeleccionado()"
+      :unidad-organica="unidadOrganicaPropia"
+      @cerrar="cerrarModalAutorizacion"
+      @solicitud-preparada="alPrepararSolicitudAutorizacion"
+    />
 
     <!-- Modal de confirmación. -->
     <div v-if="mostrarConfirmacionAsignar" class="modal-overlay">
