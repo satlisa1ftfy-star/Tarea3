@@ -13,11 +13,13 @@ public final class XmlBuilder {
         StringBuilder xml = new StringBuilder();
         xml.append("<").append(nombre);
         atributos.forEach((clave, valor) -> {
+            // Nulo: no se envía el atributo; OPENXML lo lee como NULL.
+            if (valor == null) return;
             xml.append(" ")
                     .append(clave)
                     .append("=\"")
                     .append(StringEscapeUtils.escapeXml10(
-                            valor == null ? "" : valor.toString()
+                            valor.toString()
                     ))
                     .append("\"");
         });

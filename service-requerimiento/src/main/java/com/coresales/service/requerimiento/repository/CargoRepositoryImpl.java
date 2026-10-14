@@ -84,8 +84,6 @@ public class CargoRepositoryImpl
                             ? null
                             : ((Number) fila[5]).intValue()
             );
-            System.out.println("cargos");
-            System.out.println(cargos);
             listaCargos.add(cargos);
         }
 
