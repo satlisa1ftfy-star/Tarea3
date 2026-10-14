@@ -63,25 +63,78 @@ function formatearFecha(fechaISO) {
   return fecha.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-function aTarjeta(req) {
-  return [
-    `REQ-${req.codigoRequerimiento}`,
-    req.titulo || '(sin título)',
-    req.unidadOrganicaSolicitante || req.unidadOrganicaRequerimiento || '-',
-    formatearFecha(req.fechaRegistro),
-    req.prioridad || 'Media',
-  ]
+// dd/mm/aaaa hh:mm:ss (detalle del requerimiento).
+export function formatearFechaHora(fechaISO) {
+  if (!fechaISO) return '-'
+  const fecha = new Date(fechaISO)
+  if (Number.isNaN(fecha.getTime())) return String(fechaISO)
+  const hora = fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  return `${formatearFecha(fechaISO)} ${hora}`
 }
 
-/**
- * Agrupa requerimientos "Mis requerimientos"
- * mediante códigos de estado, consolidando cierres y separando "No conforme".
- */
-export function construirTablero(requerimientos) {
-  const columns = COLUMNAS_MIS_REQUERIMIENTOS.map((col) => {
-    const reqs = requerimientos.filter((r) => col.estados.includes(r.codigoEstado))
-    return { title: col.title, tone: col.tone, total: reqs.length, cards: reqs.map(aTarjeta) }
-  })
+// La descripción del legado viene en HTML (copiado de Word/Outlook): se muestra como texto limpio,
+// como en el sistema antiguo. Se usa DOMParser (no v-html) para no ejecutar nada del contenido.
+export function htmlATexto(html) {
+  const fuente = String(html || '')
+  if (!fuente.trim()) return ''
+  if (typeof DOMParser === 'undefined' || !/[<&]/.test(fuente)) return fuente.trim()
+  const doc = new DOMParser().parseFromString(fuente, 'text/html')
+  doc.querySelectorAll('br').forEach((br) => br.replaceWith('\n'))
+  doc.querySelectorAll('li').forEach((li) => li.prepend('• '))
+  doc.querySelectorAll('p, div, li, tr, h1, h2, h3, h4, h5, h6').forEach((el) => el.append('\n'))
+  return (doc.body.textContent || '')
+    .replace(/\u00a0/g, ' ')          // &nbsp;
+    .replace(/[ \t]+/g, ' ')          // espacios repetidos de Word
+    .split('\n').map((l) => l.trim()).join('\n')
+    .replace(/\n{3,}/g, '\n\n')       // como máximo una línea en blanco
+    .trim()
+}
+
+// Mis pendientes no incluye requerimientos cerrados.
+export function sinCerrados(requerimientos = []) {
+  return requerimientos.filter((r) => !ESTADOS_CERRADO.includes(r.codigoEstado))
+}
+
+function iniciales(nombre) {
+  const p = String(nombre || '').trim().split(/\s+/).filter(Boolean)
+  if (!p.length) return ''
+  return ((p[0][0] || '') + (p[1]?.[0] || '')).toUpperCase()
+}
+
+// Tarjeta del tablero a partir de una fila de /api/requerimiento/buscar.
+export function aTarjeta(req) {
+  const texto = (v) => String(v || '').trim()
+  return {
+    codigo: req.codigoRequerimiento,
+    numero: String(req.codigoRequerimiento), 
+    area: texto(req.unidadOrganicaSolicitante) || texto(req.unidadOrganicaRequerimiento) || '-',
+    categoria: texto(req.categoria),
+    subcategoria: texto(req.subcategoria),
+    descripcion: htmlATexto(req.descripcion),
+    fecha: formatearFecha(req.fechaRegistro),
+    fechaHora: formatearFechaHora(req.fechaRegistro),
+    prioridad: texto(req.prioridad) || 'Normal',
+    codigoEstado: req.codigoEstado,
+    estado: texto(req.estado),
+    solicitante: texto(req.solicitante),
+    cargoSolicitante: texto(req.cargoSolicitante),
+    inicialesSolicitante: iniciales(req.solicitante),
+    responsable: texto(req.responsable),
+    cargoResponsable: texto(req.cargoResponsable),
+    unidadOrganicaResponsable: texto(req.unidadOrganicaResponsable),
+    inicialesResponsable: iniciales(req.responsable),
+    raw: req,
+  }
+}
+
+// Métricas + columnas de una subpestaña a partir de su lista de requerimientos.
+export function construirTablero(pestana, requerimientos = []) {
+  const columns = (COLUMNAS[pestana] || [])
+    .map((col) => {
+      const reqs = col.estados ? requerimientos.filter((r) => col.estados.includes(r.codigoEstado)) : requerimientos
+      return { title: col.title, tone: col.tone, icon: col.icon, soloSiHay: !!col.soloSiHay, total: reqs.length, cards: reqs.map(aTarjeta) }
+    })
+    .filter((c) => !c.soloSiHay || c.total > 0)
 
   const metrics = columns.map((c) => ({ title: c.title, total: c.total, tone: c.tone, icon: c.icon }))
   // Vista lista (tabla del Figma): todas las filas con su grupo (columna).
@@ -138,42 +191,15 @@ export async function cargarPestanas(perfil = null, codigoUoActiva = 0) {
  * Búsqueda contra el backend (solo los filtros que acepta /buscar).
  * Con número no se acota por fecha: un número puede ser de cualquier fecha.
  */
-export async function cargarPendientes(perfil = null) {
-  const codigoPersonaGr = perfil?.codigoPersonaGr
-
-  if (!codigoPersonaGr) {
-    return {
-      metrics: mockMetricsPendientes,
-      columns: mockColumnsPendientes,
-      online: false,
-      errorMessage: 'No hay usuario logueado.',
-    }
+export async function buscarAvanzado({ numero = 0, codigoEstado = 0, fechaInicio = 'TODO', fechaFin = 'TODO' } = {}) {
+  const filtros = { numero, codigoEstado, vigencia: 3 }
+  if (!numero) {
+    filtros.fechaInicio = fechaInicio || 'TODO'
+    filtros.fechaFin = fechaFin || 'TODO'
   }
-
   try {
-    const [comoResponsable, porConformidad] = await Promise.all([
-      buscarRequerimientos({ codigoPersonaResponsable: codigoPersonaGr, vigencia: 1 }),
-      buscarRequerimientos({ codigoPersonaSolicitante: codigoPersonaGr, codigoEstado: ESTADO.ATENDIDO, vigencia: 1 }),
-    ])
-
-    const porAsignar = comoResponsable.filter((r) => r.codigoEstado === ESTADO.POR_ASIGNAR)
-    const porAtender = comoResponsable.filter((r) => [ESTADO.ASIGNADO, ESTADO.EN_PROCESO].includes(r.codigoEstado))
-    const noConforme = comoResponsable.filter((r) => r.codigoEstado === ESTADO.NO_CONFORME)
-
-    const columns = [
-      { title: 'Por asignar', tone: 'amber', total: porAsignar.length, cards: porAsignar.map(aTarjeta) },
-      { title: 'Por atender', tone: 'blue', total: porAtender.length, cards: porAtender.map(aTarjeta) },
-      
-      // "Por autorizar" todavía no se puede completar con datos reales:
-      // solo visual, aun sin empoint  
-      { title: 'Por autorizar', tone: 'slate', total: 0, cards: [] },
-      { title: 'Por dar conformidad', tone: 'purple', total: porConformidad.length, cards: porConformidad.map(aTarjeta) },
-      { title: 'No conforme', tone: 'rose', total: noConforme.length, cards: noConforme.map(aTarjeta) },
-    ]
-
-    const metrics = columns.map((c) => [c.title, String(c.total), 'briefcase'])
-
-    return { metrics, columns, online: true }
+    const requerimientos = await buscarRequerimientos(filtros)
+    return { requerimientos: requerimientos || [], online: true }
   } catch (error) {
     console.error('No se pudo ejecutar la búsqueda avanzada.', error)
     return { requerimientos: [], online: false, errorMessage: error?.message || 'Error desconocido' }

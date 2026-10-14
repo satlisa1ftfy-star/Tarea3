@@ -1,11 +1,15 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ESTADO, buscarAvanzado, cargarPendientes, cargarTablero } from '../models/dashboard'
-import { listarRoles } from '../services/seguridadService'
+import {
+  ESTADO, PESTANAS, buscarAvanzado, cargarNoClasificados, cargarPestanas, construirTablero, repartirResultados,
+  formatearFechaHora, htmlATexto,
+} from '../models/dashboard'
+import { listarRoles, registrarSesion } from '../services/seguridadService'
 import { listarPersonas } from '../services/personaService'
 import { buscarUnidadOrganica } from '../services/unidadOrganicaService'
 import {
   asignarRequerimiento, consultarAdjuntosRequerimiento, consultarDetalleRequerimiento, consultarHistorialRequerimiento,
+  consultarPersonasAutorizan,
 } from '../services/requerimientoService'
 import { buscarCategorias, buscarSubcategorias } from '../services/categoriaService'
 import Icon from '../components/Icon.vue'
@@ -501,6 +505,7 @@ function cerrarDetalle() {
   detalleExtra.value = null
   historialDetalle.value = []
   adjuntosDetalle.value = []
+  autorizacionesDetalle.value = []
 }
 
 const observacionDetalle = ref('')
@@ -509,6 +514,7 @@ const observacionDetalle = ref('')
 const detalleExtra = ref(null)
 const historialDetalle = ref([])
 const adjuntosDetalle = ref([])
+const autorizacionesDetalle = ref([]) // Personas que autorizan
 const cargandoDetalle = ref(false)
 const errorDetalle = ref('')
 let consultaDetalleId = 0
@@ -517,18 +523,21 @@ async function cargarDetalleCompleto(codigo) {
   detalleExtra.value = null
   historialDetalle.value = []
   adjuntosDetalle.value = []
+  autorizacionesDetalle.value = []
   errorDetalle.value = ''
   cargandoDetalle.value = true
-  const [detalle, historial, adjuntos] = await Promise.allSettled([
+  const [detalle, historial, adjuntos, autorizaciones] = await Promise.allSettled([
     consultarDetalleRequerimiento(codigo),
     consultarHistorialRequerimiento(codigo),
     consultarAdjuntosRequerimiento(codigo),
+    consultarPersonasAutorizan(codigo),
   ])
   if (id !== consultaDetalleId) return
   if (detalle.status === 'fulfilled') detalleExtra.value = detalle.value
   if (historial.status === 'fulfilled') historialDetalle.value = historial.value || []
   if (adjuntos.status === 'fulfilled') adjuntosDetalle.value = adjuntos.value || []
-  const fallo = [detalle, historial, adjuntos].find((r) => r.status === 'rejected')
+  if (autorizaciones.status === 'fulfilled') autorizacionesDetalle.value = autorizaciones.value || []
+  const fallo = [detalle, historial, adjuntos, autorizaciones].find((r) => r.status === 'rejected')
   if (fallo) {
     console.error('No se pudo cargar el detalle completo.', fallo.reason)
     errorDetalle.value = fallo.reason?.message || 'No se pudo cargar el detalle completo.'
@@ -609,6 +618,14 @@ function iconoPrioridad(prioridad) {
   if (p.includes('alta') || p.includes('importante')) return 'star'
   return null
 }
+// Estado de la autorización (GRMaeAtributos): Por autorizar / Autorizado / No autorizado.
+function claseAutorizacion(estado) {
+  const e = String(estado || '').toLowerCase()
+  if (e.includes('no autoriz')) return 'rojo'
+  if (e.includes('por autoriz')) return 'ambar'
+  if (e.includes('autoriz')) return 'verde'
+  return 'gris'
+}
 function clasePrioridad(prioridad) {
   return (prioridad || 'normal').toLowerCase().split(/\s+/)[0]
 }
@@ -663,6 +680,9 @@ const puedeAsignar = computed(() =>
   vista.value === 'requerimientos' && pestana.value === 'pendientes' &&
   ESTADOS_ASIGNABLES.includes(selectedRequest.value?.codigoEstado)
 )
+// Solicitar autorización: mismo criterio que Asignar (Operador/Administrador/Responsable
+// sobre sus pendientes, ni Atendido ni Cerrado).
+const puedeSolicitarAutorizacion = computed(() => puedeAsignar.value)
 
 const mostrarModalAsignar = ref(false)
 const mostrarConfirmacionAsignar = ref(false)
@@ -914,18 +934,10 @@ function cerrarModalAutorizacion() {
 
 function alPrepararSolicitudAutorizacion(payload) {
   mostrarModalAutorizacion.value = false
-  mensajeAutorizacion.value = `Solicitud de autorización preparada para ${payload.codigosPersonaAutoriza.length} persona(s).`
+  mensajeAutorizacion.value = `Solicitud de autorización registrada para ${payload.codigosPersonaAutoriza.length} persona(s).`
+  // Refresca el detalle (historial y ubicación) con el movimiento registrado.
+  if (selectedRequest.value?.codigo) cargarDetalleCompleto(selectedRequest.value.codigo)
 }
-
-// Carga según rol activo: Administrador usa búsqueda manual; Operador autocarga
-const modoBusqueda = computed(() => {
-  const rol = perfilActivo.value?.nombreRol
-  if (rol === 'Administrador') return 'manual'
-  if (rol === 'Operador') return 'automatico'
-  return null
-})
-// Usa la UO del rol activo como aproximación (el SP solo filtra por UO solicitante/responsable).
-const unidadOrganicaBusqueda = computed(() => perfilActivo.value?.codigoUnidadOrganica || 0)
 
 // Supervisor:
 const menuSupervisor = computed(() => perfilActivo.value?.nombreRol === 'Supervisor')
@@ -1201,6 +1213,37 @@ onBeforeUnmount(() => {
               <button @click="imprimirDetalle"><Icon name="printer" :size="15" /> Imprimir</button>
               <button disabled title="Pendiente: falta endpoint en service-requerimiento"><Icon name="check" :size="15" /> Iniciar</button>
               <button :disabled="!puedeAsignar" :title="puedeAsignar ? '' : 'Solo desde Mis pendientes y si no está Atendido/Cerrado'" @click="abrirModalAsignar"><Icon name="user" :size="15" /> Asignar</button>
+              <!-- Botón dividido de autorizaciones: la zona principal abre directamente
+                   "Solicitar autorización"; la flecha despliega Solicitar / Consultar / Anular
+                   (todas abren el mismo modal en distinto modo). -->
+              <div ref="menuAutorizacionesRef" class="menu-autorizaciones" @keydown="alTeclaMenuAutorizaciones">
+                <div class="menu-autorizaciones-grupo">
+                  <button type="button" class="menu-autorizaciones-principal" :disabled="!puedeSolicitarAutorizacion" :title="puedeSolicitarAutorizacion ? '' : 'Solo desde Mis pendientes y si no está Atendido/Cerrado'" @click="elegirAccionAutorizacion('solicitar')">
+                    <Icon name="shield" :size="14" /> Solicitar autorización
+                  </button>
+                  <button
+                    ref="botonAutorizacionesRef"
+                    type="button"
+                    class="menu-autorizaciones-toggle"
+                    :disabled="!puedeSolicitarAutorizacion"
+                    aria-label="Más acciones de autorización"
+                    aria-haspopup="menu"
+                    :aria-expanded="menuAutorizacionesAbierto"
+                    @click="alternarMenuAutorizaciones"
+                  >
+                    <Icon :name="menuAutorizacionesAbierto ? 'chevron-up' : 'chevron-down'" :size="13" />
+                  </button>
+                </div>
+                <div v-if="menuAutorizacionesAbierto" class="menu-autorizaciones-lista" role="menu" aria-label="Autorizaciones">
+                  <button type="button" role="menuitem" @click="elegirAccionAutorizacion('solicitar')">
+                    <Icon name="shield" :size="14" /> Solicitar autorización
+                  </button>
+                  <div class="menu-autorizaciones-separador" role="separator"></div>
+                  <button type="button" role="menuitem" class="menu-autorizaciones-anular" @click="elegirAccionAutorizacion('anular')">
+                    <Icon name="x" :size="14" /> Anular autorizaciones…
+                  </button>
+                </div>
+              </div>
               <button disabled title="Pendiente: falta endpoint en service-requerimiento"><Icon name="file-text" :size="15" /> Clasificar</button>
               <button disabled title="Pendiente: falta endpoint en service-requerimiento"><Icon name="clock" :size="15" /> Evaluar impacto</button>
               <button class="detalle-accion-borde" disabled title="Pendiente: falta endpoint en service-requerimiento">⚠ Problema/Solución</button>
@@ -1211,6 +1254,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <p v-if="mensajeAutorizacion" class="conn-status">✓ {{ mensajeAutorizacion }}</p>
           <p v-if="errorDetalle" class="conn-status conn-status--offline detalle-aviso">⚠ No se pudo cargar parte del detalle (medio de envío, correos, historial, adjuntos): {{ errorDetalle }} <button @click="cargarDetalleCompleto(selectedRequest.codigo)">Reintentar</button></p>
 
           <div class="detalle-grid">
@@ -1241,6 +1285,23 @@ onBeforeUnmount(() => {
                     </tr>
                     <tr v-if="!(detalleExtra?.correosCopia || []).length">
                       <td colspan="3" class="td-vacio">{{ cargandoDetalle ? 'Cargando…' : 'Sin correos en copia.' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+
+              <!-- Solo aparece cuando se solicitó autorización (hay filas). -->
+              <section v-if="autorizacionesDetalle.length" class="detalle-card detalle-card--tabla">
+                <h3>Personas que Autorizan</h3>
+                <table class="detalle-tabla">
+                  <thead><tr><th>Fec. Solicitud</th><th>Fec. Autorización</th><th>Código</th><th>Apellidos y Nombres</th><th>Estado</th></tr></thead>
+                  <tbody>
+                    <tr v-for="(a, i) in autorizacionesDetalle" :key="`${a.codigoPersona}-${i}`">
+                      <td class="td-fecha-hora">{{ formatearFechaHora(a.fechaSolicitud) }}</td>
+                      <td class="td-fecha-hora">{{ a.fechaAutorizacion ? formatearFechaHora(a.fechaAutorizacion) : '—' }}</td>
+                      <td class="td-usuario">{{ a.codigoPersona || '—' }}</td>
+                      <td><strong>{{ a.nombre || '—' }}</strong></td>
+                      <td><span class="estado-pill" :class="claseAutorizacion(a.estado)">{{ a.estado || '—' }}</span></td>
                     </tr>
                   </tbody>
                 </table>
@@ -1551,77 +1612,7 @@ onBeforeUnmount(() => {
       </template>
     </section>
 
-    <!-- Panel de detalle -->
-    <aside v-if="selectedRequest" class="detail-panel">
-      <div class="detail-panel-head">
-        <div>
-          <button class="detail-back" @click="cerrarDetalle"><Icon name="arrow-left" :size="14" /> Volver al tablero</button>
-          <div class="detail-title-row">
-            <b>{{ selectedRequest[0] }}</b>
-            <span class="status-pill" :style="{ color: 'var(--blue)', background: '#eaf0ff' }">{{ selectedColumn?.title }}</span>
-            <span class="priority-badge" :class="selectedRequest[4].toLowerCase()">{{ selectedRequest[4] }}</span>
-          </div>
-          <h2 class="detail-subtitle">{{ selectedRequest[1] }}</h2>
-        </div>
-        <button class="close-detail" aria-label="Cerrar detalle" @click="cerrarDetalle"><Icon name="x" :size="18" /></button>
-      </div>
-
-      <div class="detail-actions">
-        <button class="move"><Icon name="move" :size="14" /> Mover de estado</button>
-        <button v-if="puedeAsignar" class="asignar" @click="abrirModalAsignar"><Icon name="user-plus" :size="14" /> Asignar</button>
-        <!-- Botón dividido de autorizaciones: la zona principal abre directamente
-             "Solicitar autorización"; la flecha despliega Solicitar / Consultar / Anular
-             (todas abren el mismo modal en distinto modo). -->
-        <div ref="menuAutorizacionesRef" class="menu-autorizaciones" @keydown="alTeclaMenuAutorizaciones">
-          <div class="menu-autorizaciones-grupo">
-            <button type="button" class="menu-autorizaciones-principal" @click="elegirAccionAutorizacion('solicitar')">
-              <Icon name="shield" :size="14" /> Solicitar autorización
-            </button>
-            <button
-              ref="botonAutorizacionesRef"
-              type="button"
-              class="menu-autorizaciones-toggle"
-              aria-label="Más acciones de autorización"
-              aria-haspopup="menu"
-              :aria-expanded="menuAutorizacionesAbierto"
-              @click="alternarMenuAutorizaciones"
-            >
-              <Icon :name="menuAutorizacionesAbierto ? 'chevron-up' : 'chevron-down'" :size="13" />
-            </button>
-          </div>
-          <div v-if="menuAutorizacionesAbierto" class="menu-autorizaciones-lista" role="menu" aria-label="Autorizaciones">
-            <button type="button" role="menuitem" @click="elegirAccionAutorizacion('solicitar')">
-              <Icon name="shield" :size="14" /> Solicitar autorización
-            </button>
-            <div class="menu-autorizaciones-separador" role="separator"></div>
-            <button type="button" role="menuitem" class="menu-autorizaciones-anular" @click="elegirAccionAutorizacion('anular')">
-              <Icon name="x" :size="14" /> Anular autorizaciones…
-            </button>
-          </div>
-        </div>
-        <template v-if="puedeDarConformidad">
-          <button class="conformidad-si"><Icon name="check" :size="14" /> Dar conformidad</button>
-          <button class="conformidad-no"><Icon name="x" :size="14" /> Dar no conformidad</button>
-        </template>
-        <button><Icon name="history" :size="14" /> Ver historial</button>
-      </div>
-
-      <div class="detail-body">
-        <p v-if="mensajeAutorizacion" class="conn-status">✓ {{ mensajeAutorizacion }}</p>
-        <div class="detail-card">
-          <h3>Datos del Requerimiento</h3>
-          <dl class="detail-grid">
-            <div><dt>N° Requerimiento</dt><dd>{{ selectedRequest[0] }}</dd></div>
-            <div><dt>Fecha</dt><dd>{{ selectedRequest[3] }}</dd></div>
-            <div><dt>Estado actual</dt><dd class="orange">{{ selectedColumn?.title }}</dd></div>
-            <div><dt>Prioridad</dt><dd>{{ selectedRequest[4] }}</dd></div>
-            <div style="grid-column:1/-1"><dt>Área solicitante</dt><dd>{{ selectedRequest[2] }}</dd></div>
-          </dl>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Panel "Búsqueda Avanzada" (Cambio 19) -->
+    <!-- Panel "Búsqueda Avanzada" (Figma). La fecha viene por defecto con el día de hoy. -->
     <div v-if="mostrarPanelBusqueda" class="modal-overlay" @click.self="cerrarPanelBusqueda">
       <aside class="filtros-panel">
         <div class="filtros-panel-head">
@@ -1777,7 +1768,7 @@ onBeforeUnmount(() => {
       :modo="modoAutorizacion"
       :perfil="perfil"
       :requerimiento="selectedRequest"
-      :estado="selectedColumn?.title"
+      :estado="selectedRequest?.estado || selectedColumn?.title"
       :codigo-requerimiento="codigoRequerimientoSeleccionado()"
       :unidad-organica="unidadOrganicaPropia"
       @cerrar="cerrarModalAutorizacion"

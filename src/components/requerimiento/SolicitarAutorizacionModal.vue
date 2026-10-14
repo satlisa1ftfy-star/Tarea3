@@ -21,7 +21,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   modo: { type: String, default: 'solicitar' },           // 'solicitar' | 'consultar' | 'anular'
   perfil: { type: Object, default: null },
-  requerimiento: { type: Array, default: null },          // tarjeta seleccionada (selectedRequest)
+  requerimiento: { type: Object, default: null },         // tarjeta seleccionada (selectedRequest, objeto de aTarjeta)
   estado: { type: String, default: '' },                  // título de la columna (selectedColumn.title)
   codigoRequerimiento: { type: Number, default: null },   // codigoRequerimientoSeleccionado() del Dashboard
   unidadOrganica: { type: Object, default: null },        // ya no se usa: el catálogo trae todas las UO
@@ -57,7 +57,7 @@ const errorAutorizacion = ref('')
 // -------------------------------------------------------------------------
 // Cargos autorizados (GET /api/requerimiento/buscarCargo): lista informativa,
 // independiente de la selección de personas. Categoría y subcategoría vienen
-// en las posiciones [5] y [6] de la tarjeta del requerimiento (models/dashboard.js).
+// en card.raw (fila de /buscar, ver aTarjeta en models/dashboard.js).
 const cargosAutorizados = ref([])
 const cargandoCargos = ref(false)
 const errorCargos = ref('')
@@ -65,8 +65,8 @@ const faltanDatosCargos = ref(false)
 
 const parametrosCargos = computed(() => ({
   codigoReq: props.codigoRequerimiento,
-  codigoCat: props.requerimiento?.[5] ?? null,
-  codigoSubCat: props.requerimiento?.[6] ?? null,
+  codigoCat: props.requerimiento?.raw?.codigoCategoria ?? null,
+  codigoSubCat: props.requerimiento?.raw?.codigoSubcategoria ?? null,
 }))
 
 let consultaCargosActual = ''
@@ -263,6 +263,11 @@ const puedeEnviarAutorizacion = computed(() =>
 async function enviarSolicitudAutorizacion() {
   errorAutorizacion.value = ''
   if (!puedeEnviarAutorizacion.value) return
+  // Auditoría (cCodPerActualizacion): cCodPer real del usuario logueado, sin valor fijo.
+  if (!props.perfil?.codigoPersonaOrganizacion || !props.perfil?.codigoPersonaGr) {
+    errorAutorizacion.value = 'No se pudo identificar al usuario logueado. Vuelve a iniciar sesión.'
+    return
+  }
   enviandoAutorizacion.value = true
   try {
     const payload = {
@@ -280,7 +285,7 @@ async function enviarSolicitudAutorizacion() {
       codPerAutoriza: payload.codigosPersonaAutoriza.join(','),
       codPerSolAutorizacion: payload.codigoPersonaSolicita,
       codPerHelpDesk: payload.codigoPersonaSolicita,
-      codPerActualiza: payload.codigoPersonaActualizacion|| '1001' ,
+      codPerActualiza: payload.codigoPersonaActualizacion,
       observacion: payload.motivo,
     })
     emit('solicitudPreparada', payload)
@@ -302,7 +307,7 @@ async function enviarSolicitudAutorizacion() {
       <div class="modal-grid-2">
         <div class="form-field">
           <label>Requerimiento Nº</label>
-          <input :value="requerimiento?.[0]" disabled>
+          <input :value="requerimiento?.numero" disabled>
         </div>
         <div class="form-field">
           <label>Estado del requerimiento</label>
@@ -443,7 +448,7 @@ async function enviarSolicitudAutorizacion() {
           </div>
 
           <div class="aviso-anulacion">
-            <strong>¿Anular la solicitud de autorización del requerimiento {{ requerimiento?.[0] }}?</strong>
+            <strong>¿Anular la solicitud de autorización del requerimiento {{ requerimiento?.numero }}?</strong>
             <p>
               Afectará a {{ solicitudesRegistradas.length }}
               {{ solicitudesRegistradas.length === 1 ? 'persona' : 'personas' }} listadas arriba.
@@ -479,7 +484,7 @@ async function enviarSolicitudAutorizacion() {
     v-if="visible && modo === 'solicitar' && mostrarModalBuscarPersonas"
     v-model="autorizadoresSeleccionados"
     titulo="Seleccionar personas autorizadoras"
-    :descripcion="`Requerimiento: ${requerimiento?.[0] || ''}`"
+    :descripcion="`Requerimiento: ${requerimiento?.numero || ''}`"
     @confirmar="cerrarBuscarPersonas"
     @cerrar="cerrarBuscarPersonas"
   />

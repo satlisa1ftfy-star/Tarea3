@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { login as loginApi } from '../services/seguridadService'
 import { authHttp } from '../services/authHttp'
 import { http } from '../services/http'
-const DEV_MODE = import.meta.env.DEV
+import { orgHttp } from '../services/orgHttp'
 
 export function useAuthController() {
   const username = ref('')
@@ -14,16 +14,7 @@ export function useAuthController() {
   const errorMessage = ref('')
   // Datos devueltos por el backend al iniciar sesión
   const perfil = ref(null)
-/*
-  if (import.meta.env.DEV) {
-      isAuthenticated.value = true
-      perfil.value = {
-          codigoPersonaGr: 6043,
-          nombre: 'Usuario Desarrollo',
-          usuarioWindows: 'jhperez'
-      }
-  }
-*/
+
   async function login() {
     submitted.value = true
     errorMessage.value = ''

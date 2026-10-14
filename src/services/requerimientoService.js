@@ -18,6 +18,36 @@ export function asignarRequerimiento(payload) {
 }
 
 /**
+ * Detalle del requerimiento:
+ * medio de envío, asignado por, ubicación, tipo de evaluación, correos copia, etc.
+ */
+export function consultarDetalleRequerimiento(codigo) {
+  return http.get(`/api/requerimiento/detalle/${encodeURIComponent(codigo)}`)
+}
+
+/**
+ * Historial de movimientos, del más reciente al más antiguo.
+ */
+export function consultarHistorialRequerimiento(codigo) {
+  return http.get(`/api/requerimiento/historial/${encodeURIComponent(codigo)}`)
+}
+
+/**
+ * Documentos adjuntos. Solo lista: la descarga
+ * queda pendiente del servicio de documentos.
+ */
+export function consultarAdjuntosRequerimiento(codigo) {
+  return http.get(`/api/requerimiento/adjuntos/${encodeURIComponent(codigo)}`)
+}
+
+/**
+ * Personas que autorizan (bloque del detalle): fechas, código, nombre y estado.
+ */
+export function consultarPersonasAutorizan(codigo) {
+  return http.get(`/api/requerimiento/autorizaciones/${encodeURIComponent(codigo)}`)
+}
+
+/**
  * Cargos autorizados para un requerimiento según su categoría/subcategoría.
  * GET /api/requerimiento/buscarCargo?TipBus=&codigoReq=&codigoCat=&Codigo_SubCat=
  */
