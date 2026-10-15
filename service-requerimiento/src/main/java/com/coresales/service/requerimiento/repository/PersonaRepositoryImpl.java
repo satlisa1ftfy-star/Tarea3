@@ -23,7 +23,6 @@ public class PersonaRepositoryImpl
             Integer codigoUo,
             Integer vigencia
     ) {
-
         String xml =
                 "<R>" +
                         "<XmlGR " +

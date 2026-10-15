@@ -3,6 +3,7 @@ package com.coresales.service.requerimiento.repository;
 import com.coresales.service.requerimiento.model.CorreoCopia;
 import com.coresales.service.requerimiento.model.DocumentoAdjuntoDetalle;
 import com.coresales.service.requerimiento.model.HistorialRequerimiento;
+import com.coresales.service.requerimiento.model.PersonaAutoriza;
 import com.coresales.service.requerimiento.model.RequerimientoDetalle;
 import org.springframework.jdbc.core.CallableStatementCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -86,6 +87,44 @@ public class RequerimientoDetalleRepositoryImpl
                     }
                     detalle.setCorreosCopia(correos);
                     return detalle;
+                }
+        );
+    }
+
+    // Personas que autorizan (activas), con fechas de solicitud y autorización.
+    @Override
+    public List<PersonaAutoriza> consultarPersonasAutorizan(Integer codigoRequerimiento) {
+
+        String xml = "<R><XmlGR iCodigo_Req=\"" + codigoRequerimiento + "\" /></R>";
+
+        return jdbcTemplate.execute(
+                "{call dbo.spGR_Requerimiento_ConsultarPersonasAutorizan(?)}",
+                (CallableStatementCallback<List<PersonaAutoriza>>) cs -> {
+                    cs.setString(1, xml);
+                    List<PersonaAutoriza> personas = new ArrayList<>();
+
+                    boolean esResultSet = cs.execute();
+                    while (true) {
+                        if (esResultSet) {
+                            try (ResultSet rs = cs.getResultSet()) {
+                                Set<String> columnas = columnas(rs);
+                                while (rs.next()) {
+                                    personas.add(new PersonaAutoriza(
+                                            fecha(rs, columnas, "FechaSolicitud"),
+                                            fecha(rs, columnas, "FechaAutorizacion"),
+                                            texto(rs, columnas, "Codigo"),
+                                            texto(rs, columnas, "ApellidosNombres"),
+                                            texto(rs, columnas, "Estado")
+                                    ));
+                                }
+                            }
+                            break; // un solo result set
+                        } else if (cs.getUpdateCount() == -1) {
+                            break;
+                        }
+                        esResultSet = cs.getMoreResults();
+                    }
+                    return personas;
                 }
         );
     }

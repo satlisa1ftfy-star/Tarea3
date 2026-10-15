@@ -2,6 +2,7 @@ package com.coresales.service.requerimiento.service;
 
 import com.coresales.service.requerimiento.model.DocumentoAdjuntoDetalle;
 import com.coresales.service.requerimiento.model.HistorialRequerimiento;
+import com.coresales.service.requerimiento.model.PersonaAutoriza;
 import com.coresales.service.requerimiento.model.RequerimientoDetalle;
 import com.coresales.service.requerimiento.repository.RequerimientoDetalleRepository;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,12 @@ public class RequerimientoDetalleServiceImpl
     public List<DocumentoAdjuntoDetalle> consultarAdjuntos(Integer codigoRequerimiento) {
         validar(codigoRequerimiento);
         return requerimientoDetalleRepository.consultarAdjuntos(codigoRequerimiento);
+    }
+
+    @Override
+    public List<PersonaAutoriza> consultarPersonasAutorizan(Integer codigoRequerimiento) {
+        validar(codigoRequerimiento);
+        return requerimientoDetalleRepository.consultarPersonasAutorizan(codigoRequerimiento);
     }
 
     private void validar(Integer codigoRequerimiento) {

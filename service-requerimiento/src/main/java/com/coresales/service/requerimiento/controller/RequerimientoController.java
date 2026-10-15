@@ -1,18 +1,25 @@
 package com.coresales.service.requerimiento.controller;
 
+import com.coresales.service.requerimiento.dto.response.ConsultaSolicitudAutorizaResponse;
 import com.coresales.service.requerimiento.model.AsignarRequerimientoRequest;
+import com.coresales.service.requerimiento.model.AutorizarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.ClasificarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.DocumentoAdjuntoDetalle;
 import com.coresales.service.requerimiento.model.HistorialRequerimiento;
+import com.coresales.service.requerimiento.model.PersonaAutoriza;
 import com.coresales.service.requerimiento.model.RegistrarRequerimientoRequest;
 import com.coresales.service.requerimiento.model.Requerimiento;
 import com.coresales.service.requerimiento.model.RequerimientoAsignado;
 import com.coresales.service.requerimiento.model.RequerimientoDetalle;
 import com.coresales.service.requerimiento.model.RequerimientoDetalleDTO;
 import com.coresales.service.requerimiento.model.RequerimientoRegistroResponse;
+import com.coresales.service.requerimiento.model.RequerimientoResultado;
+import com.coresales.service.requerimiento.model.SolicitarAutorizaRequerimientoRequest;
 import com.coresales.service.requerimiento.service.IRequerimientoAsignacionService;
+import com.coresales.service.requerimiento.service.IRequerimientoAutorizarService;
 import com.coresales.service.requerimiento.service.IRequerimientoDetalleService;
 import com.coresales.service.requerimiento.service.IRequerimientoService;
+import com.coresales.service.requerimiento.service.IRequerimientoSolicitaAutorizaService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -38,11 +45,15 @@ public class RequerimientoController {
     private final IRequerimientoService requerimientoService;
     private final IRequerimientoAsignacionService requerimientoAsignacionService;
     private final IRequerimientoDetalleService requerimientoDetalleService;
+    private final IRequerimientoAutorizarService requerimientoAutorizarService;
+    private final IRequerimientoSolicitaAutorizaService requerimientoSolicitaAutorizaService;
 
     public RequerimientoController(
             IRequerimientoService requerimientoService,
             IRequerimientoAsignacionService requerimientoAsignacionService,
-            IRequerimientoDetalleService requerimientoDetalleService
+            IRequerimientoDetalleService requerimientoDetalleService,
+            IRequerimientoAutorizarService requerimientoAutorizarService,
+            IRequerimientoSolicitaAutorizaService requerimientoSolicitaAutorizaService
     ) {
         this.requerimientoService =
                 requerimientoService;
@@ -50,6 +61,10 @@ public class RequerimientoController {
                 requerimientoAsignacionService;
         this.requerimientoDetalleService =
                 requerimientoDetalleService;
+        this.requerimientoAutorizarService =
+                requerimientoAutorizarService;
+        this.requerimientoSolicitaAutorizaService =
+                requerimientoSolicitaAutorizaService;
     }
 
     @GetMapping("/buscar")
@@ -355,6 +370,75 @@ public class RequerimientoController {
     ) {
         return ResponseEntity.ok(
                 requerimientoDetalleService.consultarAdjuntos(codigo)
+        );
+    }
+
+    @GetMapping("/autorizaciones/{codigo}")
+    @Operation(
+            summary = "Personas que autorizan",
+            description = """
+                    Bloque "Personas que Autorizan" del detalle: fechas de solicitud y autorización,
+                    código, nombre y estado (spGR_Requerimiento_ConsultarPersonasAutorizan).
+                    """
+    )
+    public ResponseEntity<List<PersonaAutoriza>> autorizaciones(
+            @Parameter(description = "Número de requerimiento.", example = "286933")
+            @PathVariable
+            Integer codigo
+    ) {
+        return ResponseEntity.ok(
+                requerimientoDetalleService.consultarPersonasAutorizan(codigo)
+        );
+    }
+
+    // Autorizaciones (Jhon): spGR_Requerimiento_RegistrarPersonaAutorizacion
+    // y spGR_Requerimiento_ConsultarPersonaAutorizacion.
+    @PostMapping("/solicitar")
+    @Operation(
+            summary = "Solicitar autorización",
+            description = "Registra a las personas que deben autorizar el requerimiento (siTipBus = 1)."
+    )
+    public ResponseEntity<RequerimientoResultado> solicitar(
+            @RequestBody
+            SolicitarAutorizaRequerimientoRequest solicitud,
+            HttpServletRequest httpRequest
+    ) {
+        solicitud.setNomTerminal(obtenerIpCliente(httpRequest));
+
+        return ResponseEntity.ok(
+                requerimientoSolicitaAutorizaService.solicitarAutorizacion(solicitud)
+        );
+    }
+
+    @PostMapping("/autorizar")
+    @Operation(
+            summary = "Autorizar requerimiento",
+            description = "Autoriza o no autoriza la atención del requerimiento (siTipBus = 2)."
+    )
+    public ResponseEntity<RequerimientoResultado> autorizar(
+            @RequestBody
+            AutorizarRequerimientoRequest solicitud,
+            HttpServletRequest httpRequest
+    ) {
+        solicitud.setNomTerminal(obtenerIpCliente(httpRequest));
+
+        return ResponseEntity.ok(
+                requerimientoAutorizarService.autorizar(solicitud)
+        );
+    }
+
+    @GetMapping("/consultarSolicitud")
+    @Operation(
+            summary = "Consultar personas que autorizan",
+            description = "Personas a las que se solicitó autorización y su estado (siTipBus = 1)."
+    )
+    public ResponseEntity<List<ConsultaSolicitudAutorizaResponse>> consultarSolicitud(
+            @Parameter(description = "Número de requerimiento.", example = "280177")
+            @RequestParam
+            Integer codigoRequerimiento
+    ) {
+        return ResponseEntity.ok(
+                requerimientoSolicitaAutorizaService.consultarSolicitud("1", codigoRequerimiento)
         );
     }
 
