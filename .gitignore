@@ -12,3 +12,4 @@ Claude outputs/
 
 # Copias de referencia (.rar), no son parte del frontend
 src/others/
+*.tar

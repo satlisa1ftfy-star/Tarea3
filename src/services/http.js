@@ -81,8 +81,5 @@ export function createHttpClient(baseUrl) {
   }
 }
 
-// Cliente para requerimiento (requerimientos, personas, categorías, etc.)
-export const http = createHttpClient(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082')
-
-// Cliente para Organizacion (requerimientos, personas, categorías, etc.)
-export const httpOrg = createHttpClient(import.meta.env.VITE_ORG_API_BASE_URL || 'http://localhost:8083')
+// Cliente para requerimiento (requerimientos, categorías, estados, etc.)
+export const http = createHttpClient(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080')
