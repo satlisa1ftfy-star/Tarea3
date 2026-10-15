@@ -2,6 +2,7 @@ package com.coresales.service.requerimiento.repository;
 
 import com.coresales.service.requerimiento.model.DocumentoAdjuntoDetalle;
 import com.coresales.service.requerimiento.model.HistorialRequerimiento;
+import com.coresales.service.requerimiento.model.PersonaAutoriza;
 import com.coresales.service.requerimiento.model.RequerimientoDetalle;
 
 import java.util.List;
@@ -13,4 +14,6 @@ public interface RequerimientoDetalleRepository {
     List<HistorialRequerimiento> consultarHistorial(Integer codigoRequerimiento);
 
     List<DocumentoAdjuntoDetalle> consultarAdjuntos(Integer codigoRequerimiento);
+
+    List<PersonaAutoriza> consultarPersonasAutorizan(Integer codigoRequerimiento);
 }
